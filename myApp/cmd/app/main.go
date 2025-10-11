@@ -1,6 +1,5 @@
 package main
 
-//main.go
 import (
 	"context"
 	"crypto/sha256"
@@ -36,13 +35,10 @@ func main() {
 		}
 	}()
 
+	// Проверки для prod (OWASP A05).
 	if cfg.Env == "prod" {
 		if len(cfg.CSRFKey) < 32 {
 			core.LogError("Invalid CSRF_KEY in production", map[string]interface{}{"length": len(cfg.CSRFKey)})
-			os.Exit(1)
-		}
-		if cfg.Secure && (cfg.CertFile == "" || cfg.KeyFile == "") {
-			core.LogError("Missing TLS_CERT_FILE or TLS_KEY_FILE in production", nil)
 			os.Exit(1)
 		}
 		if cfg.Addr == "" {
@@ -51,7 +47,12 @@ func main() {
 		}
 	}
 
-	handler := app.New(cfg, derive32(cfg.CSRFKey))
+	handler, err := app.New(cfg, derive32(cfg.CSRFKey))
+	if err != nil {
+		core.LogError("Failed to initialize app", map[string]interface{}{"error": err.Error()})
+		os.Exit(1)
+	}
+
 	srv, err := app.Server(cfg, handler)
 	if err != nil {
 		core.LogError("Failed to create server", map[string]interface{}{"error": err.Error()})
@@ -63,13 +64,7 @@ func main() {
 
 	go func() {
 		log.Printf("INFO: http: listening addr=%s env=%s app=%s", cfg.Addr, cfg.Env, cfg.AppName)
-		var err error
-		if cfg.Secure {
-			err = srv.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile)
-		} else {
-			err = srv.ListenAndServe()
-		}
-		if !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			core.LogError("Server error", map[string]interface{}{"error": err.Error()})
 			os.Exit(1)
 		}
@@ -84,6 +79,7 @@ func main() {
 	}
 }
 
+// derive32 создаёт 32-байтовый ключ для CSRF (OWASP A07).
 func derive32(secret string) []byte {
 	sum := sha256.Sum256([]byte(secret))
 	return sum[:]

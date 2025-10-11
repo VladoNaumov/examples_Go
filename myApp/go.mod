@@ -7,7 +7,6 @@ require (
 	github.com/go-playground/validator/v10 v10.28.0
 	github.com/gorilla/csrf v1.7.3
 	github.com/microcosm-cc/bluemonday v1.0.27
-	golang.org/x/time v0.14.0
 )
 
 require (
