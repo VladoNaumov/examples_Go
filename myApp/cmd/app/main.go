@@ -1,5 +1,6 @@
 package main
 
+//main.go
 import (
 	"context"
 	"crypto/sha256"
@@ -35,7 +36,6 @@ func main() {
 		}
 	}()
 
-	// Проверки для prod (OWASP A05).
 	if cfg.Env == "prod" {
 		if len(cfg.CSRFKey) < 32 {
 			core.LogError("Invalid CSRF_KEY in production", map[string]interface{}{"length": len(cfg.CSRFKey)})
@@ -53,11 +53,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv, err := app.Server(cfg, handler)
-	if err != nil {
-		core.LogError("Failed to create server", map[string]interface{}{"error": err.Error()})
-		os.Exit(1)
-	}
+	srv := app.Server(cfg, handler)
 
 	sigs, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

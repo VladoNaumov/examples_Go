@@ -1,8 +1,11 @@
 package middleware
 
+// proxy.go
 import (
+	"crypto/tls"
 	"net"
 	"net/http"
+	"strings"
 )
 
 // TrustedProxy обрабатывает X-Forwarded-For и X-Forwarded-Proto (OWASP A05).
@@ -26,15 +29,16 @@ func TrustedProxy(trustedIPs []string) func(http.Handler) http.Handler {
 
 			// Устанавливаем реальный IP из X-Forwarded-For.
 			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				ips := net.ParseIP(forwarded)
-				if ips != nil {
-					r.RemoteAddr = forwarded
+				ips := strings.Split(forwarded, ",")
+				if len(ips) > 0 {
+					r.RemoteAddr = strings.TrimSpace(ips[0])
 				}
 			}
 
 			// Проверяем HTTPS через X-Forwarded-Proto.
 			if proto := r.Header.Get("X-Forwarded-Proto"); proto == "https" {
 				r.URL.Scheme = "https"
+				r.TLS = &tls.ConnectionState{} // Фиктивный TLS для HSTS.
 			}
 
 			next.ServeHTTP(w, r)

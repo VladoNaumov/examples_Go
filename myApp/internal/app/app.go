@@ -1,5 +1,6 @@
 package app
 
+// app.go
 import (
 	"context"
 	"crypto/rand"
@@ -17,7 +18,10 @@ import (
 	"github.com/gorilla/csrf"
 )
 
-// собирает приложение (OWASP A05).
+// nonceKey - приватный ключ для context, чтобы избежать коллизий при хранении nonce.
+type nonceKey struct{}
+
+// New собирает приложение (OWASP A05).
 func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
 	tpl, err := view.New()
 	if err != nil {
@@ -26,30 +30,27 @@ func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
 
 	r := chi.NewRouter()
 
-	// Генерируем nonce на КАЖДЫЙ запрос и кладём в контекст.
+	nonce, err := generateNonce()
+	if err != nil {
+		core.LogError("Failed to generate nonce", map[string]interface{}{"error": err.Error()})
+		nonce = ""
+	}
+
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			nonce, err := generateNonce()
-			if err != nil {
-				core.LogError("Failed to generate nonce", map[string]interface{}{"error": err.Error()})
-				nonce = ""
-			}
-			ctx := context.WithValue(r.Context(), core.CtxNonce, nonce)
+			ctx := context.WithValue(r.Context(), nonceKey{}, nonce)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})
 
-	// Middleware
-	r.Use(mw.TrustedProxy([]string{"127.0.0.1", "::1"}))
+	// Middleware (OWASP A05, A09).
+	r.Use(mw.TrustedProxy([]string{"127.0.0.1", "::1"})) // Доверенные IP NGINX.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))
-
-	// Secure headers теперь берёт nonce из контекста (см. пункт 3).
-	r.Use(mw.SecureHeaders())
-
+	r.Use(mw.SecureHeaders(nonce))
 	if cfg.Secure {
 		r.Use(mw.HSTS(cfg.Env == "prod"))
 	}
@@ -65,10 +66,10 @@ func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
 		core.LogError("CSRF running without HTTPS in non-prod", nil)
 	}
 
-	// Статические файлы (кэш в NGINX)
+	// Статика (OWASP A05).
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir("web/assets"))))
 
-	// Роуты
+	// Маршруты.
 	r.Get("/", handler.Home(tpl))
 	r.Get("/about", handler.About(tpl))
 	r.Get("/form", handler.FormIndex(tpl))
@@ -79,7 +80,7 @@ func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
 	return r, nil
 }
 
-// generateNonce создаёт nonce для CSP (OWASP).
+// generateNonce создаёт nonce для CSP (OWASP A03).
 func generateNonce() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
