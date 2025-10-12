@@ -18,7 +18,6 @@ func JSON(w http.ResponseWriter, status int, v any) {
 }
 
 // NoContent отправляет HTTP 204.
-// TODO:не используемая функция ?
 func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
