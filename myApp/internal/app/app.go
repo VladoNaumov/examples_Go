@@ -1,5 +1,6 @@
 package app
 
+// app.go
 import (
 	"context"
 	"crypto/rand"
@@ -17,9 +18,11 @@ import (
 	"github.com/gorilla/csrf"
 )
 
+// nonceKey - приватный ключ для context, чтобы избежать коллизий при хранении nonce.
+type nonceKey struct{}
+
 // New собирает приложение (OWASP A05).
 func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
-	// Инициализация шаблонов.
 	tpl, err := view.New()
 	if err != nil {
 		return nil, err
@@ -27,17 +30,15 @@ func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
 
 	r := chi.NewRouter()
 
-	// Nonce для CSP (OWASP A03).
 	nonce, err := generateNonce()
 	if err != nil {
 		core.LogError("Failed to generate nonce", map[string]interface{}{"error": err.Error()})
 		nonce = ""
 	}
 
-	// Передача nonce.
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := context.WithValue(r.Context(), "nonce", nonce)
+			ctx := context.WithValue(r.Context(), nonceKey{}, nonce)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})
@@ -65,7 +66,7 @@ func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
 		core.LogError("CSRF running without HTTPS in non-prod", nil)
 	}
 
-	// Статические файлы (кэш в NGINX).
+	// Статика (OWASP A05).
 	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir("web/assets"))))
 
 	// Маршруты.

@@ -33,17 +33,17 @@ func BadRequest(msg string, fields map[string]string) *AppError {
 	return &AppError{Code: "bad_request", Status: http.StatusBadRequest, Message: msg, Fields: fields}
 }
 
-// TODO:не используемая функция ?
+// Не используется, так как 404 обрабатывается через handler.NotFound с рендером шаблона.
 func NotFound(msg string) *AppError {
 	return &AppError{Code: "not_found", Status: http.StatusNotFound, Message: msg}
 }
 
-// TODO:не используемая функция ?
+// Не используется, так как в проекте нет логики ограничения доступа (403).
 func Forbidden(msg string) *AppError {
 	return &AppError{Code: "forbidden", Status: http.StatusForbidden, Message: msg}
 }
 
-// TODO:не используемая функция ?
+// Не используется, так как нет аутентификации (401).
 func Unauthorized(msg string) *AppError {
 	return &AppError{Code: "unauthorized", Status: http.StatusUnauthorized, Message: msg}
 }

@@ -17,8 +17,7 @@ func JSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// NoContent отправляет HTTP 204.
-// TODO:не используемая функция ?
+// NoContent: Предназначена для возврата HTTP 204 (No Content), но в проекте нет таких endpoint'ов.
 func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
