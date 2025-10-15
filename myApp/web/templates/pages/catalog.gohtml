@@ -1,0 +1,69 @@
+{{define "content"}}
+    <!-- catalog.gohtml - динамический каталог товаров из MySQL -->
+    <style nonce="{{.Nonce}}">
+        body { background: #fdfdfd; }
+        .product-card {
+            transition: transform .2s, box-shadow .2s;
+        }
+        .product-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 12px rgba(0,0,0,.1);
+        }
+        .price {
+            color: #0d6efd;
+            font-weight: 600;
+        }
+        .no-products {
+            text-align: center;
+            padding: 2rem;
+            color: #6c757d;
+        }
+    </style>
+
+    <h1 class="h4 mb-4 text-center text-uppercase">Каталог товаров</h1>
+
+    {{if .Data}}
+        <div class="row g-4">
+            {{range .Data}}
+                <!-- Динамическая карточка товара из БД -->
+                <div class="col-6 col-md-4 col-lg-3">
+                    <div class="card h-100 border-0 shadow-sm product-card">
+                        <!-- SVG placeholder с динамическим alt из БД -->
+                        <svg class="bd-placeholder-img card-img-top rounded-top"
+                             width="100%" height="300"
+                             xmlns="http://www.w3.org/2000/svg"
+                             role="img"
+                             aria-label="{{or .ImageAlt "Фото товара"}}"
+                             preserveAspectRatio="xMidYMid slice"
+                             focusable="false" nonce="{{$.Nonce}}">
+                            <title>{{or .ImageAlt "Фото товара"}}</title>
+                            <rect width="100%" height="100%" fill="#eee"></rect>
+                            <text x="50%" y="50%" fill="#aaa" dy=".3em" text-anchor="middle">
+                                {{or .ImageAlt "600×600"}}
+                            </text>
+                        </svg>
+
+                        <!-- Данные товара из БД -->
+                        <div class="card-body text-center">
+                            <h6 class="card-title mb-1">{{.Name}}</h6>
+                            <div class="text-muted small mb-2">Артикул {{.Article}}</div>
+                            <div class="price mb-3">{{printf "%.2f €" .Price}}</div>
+                            <!-- Ссылка на детальную страницу (пока заглушка) -->
+                            <a href="/product/{{.ID}}" class="btn btn-outline-primary btn-sm w-100">
+                                Подробнее
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {{end}}
+        </div>
+
+    {{else}}
+        <!-- Пустой каталог -->
+        <div class="no-products">
+            <h3>Каталог пуст</h3>
+            <p>Товары отсутствуют в базе данных.</p>
+        </div>
+    {{end}}
+
+{{end}}

@@ -1,6 +1,6 @@
 package app
 
-//app.go
+// app.go
 import (
 	"context"
 	"crypto/rand"
@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"myApp/internal/core"
+	"myApp/internal/data" // ← Добавлен импорт data для DB middleware
 	"myApp/internal/http/handler"
 	mw "myApp/internal/http/middleware"
 	"myApp/internal/view"
@@ -15,20 +16,90 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/csrf"
+	"github.com/jmoiron/sqlx" // ← Импорт sqlx для типизации DB
 )
 
-// New инициализирует HTTP-роутер с middleware и маршрутами приложения
-func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
-	// Инициализирует шаблонизатор для рендеринга HTML
-	tpl, err := view.New()
+// New — собирает HTTP-роутер из модулей (middleware, DB, маршруты, шаблоны)
+func New(cfg core.Config, db *sqlx.DB, csrfKey []byte) (http.Handler, error) { // ← Добавлен db параметр
+	tpl, err := initTemplates()
 	if err != nil {
 		return nil, err
 	}
 
 	r := chi.NewRouter()
 
-	// Добавляет nonce в контекст каждого запроса для Content Security Policy
+	// Подключаем middleware в правильном порядке
+	useDatabaseMiddleware(r, db) // ← DB в контекст (первым!)
+	useBaseMiddleware(r, cfg)
+	useSecurityMiddleware(r, cfg)
+	useCSRF(r, cfg, csrfKey)
+	serveStatic(r)
+	registerRoutes(r, tpl)
+
+	return r, nil
+}
+
+/* ---------- Инициализация ---------- */
+
+// initTemplates — создаёт экземпляр шаблонизатора
+func initTemplates() (*view.Templates, error) {
+	return view.New()
+}
+
+/* ---------- Database Middleware ---------- */
+
+// useDatabaseMiddleware — добавляет *sqlx.DB в контекст каждого запроса
+// DB доступен во всех handlers через data.GetDBFromContext()
+func useDatabaseMiddleware(r *chi.Mux, db *sqlx.DB) {
 	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Помещает DB в контекст запроса через data.CtxDBKey
+			ctx := context.WithValue(r.Context(), data.CtxDBKey{}, db)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+}
+
+/* ---------- Middleware ---------- */
+
+// useBaseMiddleware — базовые middleware (nonce, логи, таймауты)
+func useBaseMiddleware(r *chi.Mux, cfg core.Config) {
+	r.Use(withNonce())                                   // Nonce для CSP (первым!)
+	r.Use(mw.TrustedProxy([]string{"127.0.0.1", "::1"})) // Доверенные прокси
+	r.Use(middleware.RequestID)                          // Уникальный ID запроса
+	r.Use(middleware.RealIP)                             // Реальный IP клиента
+	r.Use(middleware.Logger)                             // Логирование запросов
+	r.Use(middleware.Recoverer)                          // Восстановление после паники
+	r.Use(middleware.Timeout(cfg.RequestTimeout))        // Таймаут запроса
+}
+
+// useSecurityMiddleware — CSP, X-Frame-Options, HSTS (при HTTPS)
+func useSecurityMiddleware(r *chi.Mux, cfg core.Config) {
+	r.Use(mw.SecureHeaders()) // Заголовки безопасности
+	if cfg.Secure {
+		r.Use(mw.HSTS(cfg.Env == "prod")) // HSTS только при HTTPS и в продакшене
+	}
+}
+
+// useCSRF — CSRF-защита для форм (OWASP A02)
+func useCSRF(r *chi.Mux, cfg core.Config, csrfKey []byte) {
+	r.Use(csrf.Protect(
+		csrfKey,
+		csrf.Secure(cfg.Secure),             // Cookie только по HTTPS
+		csrf.SameSite(csrf.SameSiteLaxMode), // SameSite=Lax
+		csrf.HttpOnly(true),                 // Cookie HttpOnly
+		csrf.Path("/"),                      // CSRF для всех путей
+	))
+	// Предупреждение в не-продакшене без HTTPS
+	if !cfg.Secure && cfg.Env != "prod" {
+		core.LogError("CSRF работает без HTTPS в не-продакшен среде", nil)
+	}
+}
+
+// withNonce — middleware для генерации nonce для CSP
+// Добавляет случайный nonce в контекст для шаблонов
+func withNonce() func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			nonce, err := generateNonce()
 			if err != nil {
@@ -36,57 +107,38 @@ func New(cfg core.Config, csrfKey []byte) (http.Handler, error) {
 				core.Fail(w, r, core.Internal("Ошибка генерации nonce", err))
 				return
 			}
+			// Nonce доступен в шаблонах через core.CtxNonce
 			ctx := context.WithValue(r.Context(), core.CtxNonce, nonce)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
-	})
-
-	// Применяет middleware для обработки запросов
-	r.Use(mw.TrustedProxy([]string{"127.0.0.1", "::1"})) // Ограничивает доверенные прокси
-	r.Use(middleware.RequestID)                          // Добавляет уникальный ID запроса
-	r.Use(middleware.RealIP)                             // Определяет реальный IP клиента
-	r.Use(middleware.Logger)                             // Логирует запросы
-	r.Use(middleware.Recoverer)                          // Восстанавливает после паники
-	r.Use(middleware.Timeout(cfg.RequestTimeout))        // Ограничивает время выполнения запроса
-
-	// Добавляет заголовки безопасности (CSP, X-Frame-Options и др.)
-	r.Use(mw.SecureHeaders())
-
-	// Включает HSTS для продакшен-среды, если HTTPS включён
-	if cfg.Secure {
-		r.Use(mw.HSTS(cfg.Env == "prod"))
 	}
+}
 
-	// Настраивает CSRF-защиту для форм
-	r.Use(csrf.Protect(
-		csrfKey,
-		csrf.Secure(cfg.Secure),
-		csrf.SameSite(csrf.SameSiteLaxMode),
-		csrf.HttpOnly(true),
-		csrf.Path("/"),
-	))
-	// Логирует предупреждение, если CSRF используется без HTTPS в не-продакшен среде
-	if !cfg.Secure && cfg.Env != "prod" {
-		core.LogError("CSRF работает без HTTPS в не-продакшен среде", nil)
-	}
+/* ---------- Статика и маршруты ---------- */
 
-	// Обслуживает статические файлы из директории web/assets
-	r.Handle("/assets/*", http.StripPrefix("/assets/", http.FileServer(http.Dir("web/assets"))))
+// serveStatic — обслуживает статические файлы из web/assets
+func serveStatic(r *chi.Mux) {
+	fs := http.StripPrefix("/assets/", http.FileServer(http.Dir("web/assets")))
+	r.Handle("/assets/*", fs)
+}
 
-	// Регистрирует маршруты приложения
+// registerRoutes — регистрирует маршруты приложения
+// Все handlers получают DB из контекста автоматически
+func registerRoutes(r *chi.Mux, tpl *view.Templates) {
 	r.Get("/", handler.Home(tpl))
 	r.Get("/about", handler.About(tpl))
 	r.Get("/form", handler.FormIndex(tpl))
 	r.Post("/form", handler.FormSubmit(tpl))
 	r.Get("/healthz", handler.Health)
+	r.Get("/catalog", handler.Catalog(tpl))
 	r.NotFound(handler.NotFound(tpl))
-
-	return r, nil
 }
 
-// generateNonce создаёт случайный nonce для Content Security Policy (OWASP A05)
+/* ---------- Утилиты ---------- */
+
+// generateNonce — генерирует криптографически стойкий nonce для CSP
 func generateNonce() (string, error) {
-	b := make([]byte, 16)
+	b := make([]byte, 16) // 16 байт = 128 бит энтропии
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}

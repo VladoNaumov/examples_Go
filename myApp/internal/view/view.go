@@ -2,6 +2,7 @@ package view
 
 //view.go
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 
@@ -15,7 +16,7 @@ type Templates struct {
 	templates map[string]*template.Template // Карта шаблонов по именам
 }
 
-// PageData определяет данные для рендеринга шаблонов (OWASP A03: Injection, A07: Identification and Authentication Failures)
+// PageData определяет данные для рендеринга шаблонов
 type PageData struct {
 	Title     string        // Заголовок страницы
 	CSRFField template.HTML // Поле CSRF-токена
@@ -23,52 +24,54 @@ type PageData struct {
 	Data      interface{}   // Дополнительные данные для шаблона
 }
 
-// New инициализирует шаблоны из файлов (OWASP A05: Security Misconfiguration)
+// New инициализирует шаблоны из файлов
 func New() (*Templates, error) {
 	layouts := []string{
-		"web/templates/layouts/base.gohtml",    // Основной шаблон
-		"web/templates/partials/nav.gohtml",    // Частичный шаблон навигации
-		"web/templates/partials/footer.gohtml", // Частичный шаблон футера
+		"web/templates/layouts/base.gohtml",
+		"web/templates/partials/nav.gohtml",
+		"web/templates/partials/footer.gohtml",
 	}
 	pages := map[string][]string{
 		"home":     {"web/templates/pages/home.gohtml"},
 		"about":    {"web/templates/pages/about.gohtml"},
 		"form":     {"web/templates/pages/form.gohtml"},
+		"catalog":  {"web/templates/pages/catalog.gohtml"}, // Добавлен catalog
 		"notfound": {"web/templates/pages/404.gohtml"},
 	}
 
 	t := &Templates{templates: make(map[string]*template.Template)}
 	for name, pageFiles := range pages {
-		// Комбинирует общие и страничные шаблоны
 		files := append(layouts, pageFiles...)
 		tpl, err := template.ParseFiles(files...)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ошибка парсинга шаблона %s: %w", name, err)
 		}
 		t.templates[name] = tpl
 	}
 	return t, nil
 }
 
-// Render рендерит шаблон с данными, включая CSRF-токен и nonce (OWASP A03, A05)
-func (t *Templates) Render(w http.ResponseWriter, r *http.Request, templateName string, title string, data interface{}) {
+// Render рендерит шаблон с данными, включая CSRF-токен и nonce
+// Возвращает error для обработки в handlers
+func (t *Templates) Render(w http.ResponseWriter, r *http.Request, templateName string, title string, data interface{}) error {
 	tpl, ok := t.templates[templateName]
 	if !ok {
-		core.Fail(w, r, core.Internal("Шаблон не найден: "+templateName, nil))
-		return
+		core.LogError("Шаблон не найден", map[string]interface{}{
+			"template": templateName,
+		})
+		core.Fail(w, r, core.Internal("Шаблон не найден", nil))
+		return fmt.Errorf("шаблон не найден: %s", templateName)
 	}
 
-	// Получает nonce из контекста запроса
 	nonce, _ := r.Context().Value(core.CtxNonce).(string)
 	if nonce == "" {
-		core.Fail(w, r, core.Internal("Nonce не найден в контексте", nil))
-		return
+		core.LogError("Nonce не найден в контексте", nil)
+		core.Fail(w, r, core.Internal("Ошибка безопасности", nil))
+		return fmt.Errorf("nonce не найден")
 	}
 
-	// Устанавливает заголовок Content-Type
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	// Рендерит шаблон с данными
 	if err := tpl.ExecuteTemplate(w, "base", PageData{
 		Title:     title,
 		CSRFField: csrf.TemplateField(r),
@@ -80,5 +83,8 @@ func (t *Templates) Render(w http.ResponseWriter, r *http.Request, templateName 
 			"error":    err.Error(),
 		})
 		core.Fail(w, r, core.Internal("Ошибка шаблона", err))
+		return fmt.Errorf("рендеринг шаблона %s: %w", templateName, err)
 	}
+
+	return nil // Успешно отрендерено
 }

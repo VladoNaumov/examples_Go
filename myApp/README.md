@@ -12,45 +12,60 @@
 ## 📁 Структура проекта
 
 ```
-Конечно 👍 Вот в том же формате, как у тебя в примере:
 
 myApp/
 ├─ cmd/
 │  └─ app/
-│     └─ main.go    # Точка входа приложения: загружает конфиг, инициализирует логи и CSRF, 
-│                    создаёт и запускает HTTP-сервер, ожидает сигнал завершения и выполняет graceful shutdown
+│     └─ main.go    # Точка входа: конфиг, логи, CSRF, MySQL, миграции, HTTP-сервер, graceful shutdown
 │ 
 ├─ internal/
 │  ├─ app/
-│  │  └─ app.go                     # Сборка: chi.Router, middleware, статика, маршруты, 404
+│  │  └─ app.go                     # Chi router, middleware, статика, маршруты (/catalog), 404
 │  │ 
 │  ├─ core/
 │  │  ├─ config.go                  # ENV-конфиг, проверки для prod
 │  │  ├─ errors.go                  # AppError, фабрики (BadRequest, Internal)
 │  │  ├─ response.go                # JSON(), Fail() (RFC7807)
-│  │  └─ logfile.go                 # JSON-логи с ротацией (7 дней)
+│  │  └─ logfile.go                 # JSON-логи: INFO в консоль+файл, ERROR только в файл (ротация 7 дней)
+│  │ 
+│  ├─ data/                         # Слой работы с MySQL
+│  │  ├─ db.go                      # sqlx.DB пул, GetDBFromContext(), Close()
+│  │  ├─ migrations.go              # Автомиграции (EnableMigrations), числовая сортировка, транзакции
+│  │  └─ products.go                # Product struct, ListAllProducts(), GetProductByID()
+│  │  
 │  ├─ http/
 │  │  ├─ handler/
 │  │  │  ├─ home.go                 # / (HTML)
 │  │  │  ├─ about.go                # /about (HTML)
 │  │  │  ├─ form.go                 # /form (GET/POST, валидация, PRG)
+│  │  │  ├─ catalog.go              # товары из MySQL (ListAllProducts → Render)
 │  │  │  └─ misc.go                 # /healthz (JSON), NotFound (404 HTML)
 │  │  └─ middleware/
 │  │     ├─ proxy.go                # TrustedProxy для NGINX (X-Forwarded-For, Proto)
 │  │     └─ security.go             # CSP, XFO, nosniff, Referrer, Permissions, COOP, HSTS
 │  └─ view/
-│     └─ view.go                    # Централизованный рендер шаблонов
+│     └─ view.go                    # Централизованный рендер шаблонов (catalog.html)
+│ 
+├─ migrations/                      # SQL миграции (в корне!)
+│  └─ 001_schema.sql           # DROP+CREATE products, INSERT 5 товаров, индексы
+│ 
 ├─ web/
 │  ├─ assets/                      # CSS/JS/изображения/шрифты
 │  └─ templates/
 │     ├─ layouts/base.gohtml       # Основной layout
-│     ├─ partials/nav.gohtml       # Навигация
+│     ├─ partials/nav.gohtml       # Навигация (+ каталог)
 │     ├─ partials/footer.gohtml    # Футер
-│     └─ pages/{home,about,form,404}.gohtml # Страницы
-├─ logs/                           # DD-MM-YYYY.log, errors-DD-MM-YYYY.log
+│     └─ pages/
+│        ├─ home.gohtml
+│        ├─ about.gohtml
+│        ├─ form.gohtml
+│        ├─ catalog.gohtml         # Карточки товаров из MySQL
+│        └─ 404.gohtml
+├─ logs/                           # DD-MM-YYYY.log (INFO), errors-DD-MM-YYYY.log (ERROR)
 ├─ nginx.conf                      # NGINX: TLS, rate limiting, кэш, сжатие
 ├─ go.mod
 └─ go.sum
+
 
 
 ## 🌐 Маршруты

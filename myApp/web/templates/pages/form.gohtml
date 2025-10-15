@@ -1,15 +1,15 @@
 {{define "content"}}
-    <h1 class="mb-3">Форма обратной связи</h1>
+    <h1 class="h4 text-center mb-4">Связаться с нами</h1>
 
     {{if .Data.OK}}
         <div class="alert alert-success">Спасибо! Сообщение отправлено.</div>
     {{end}}
 
-    <form method="post" action="/form" novalidate>
+    <form method="post" action="/send" novalidate>
         {{.CSRFField}}
 
         <div class="mb-3">
-            <label for="name" class="form-label">Имя</label>
+            <label for="name" class="form-label">Ваше имя</label>
             <input type="text" id="name" name="name"
                    class="form-control {{if (index .Data.Errors "name")}}is-invalid{{end}}"
                    value="{{.Data.Form.Name}}" maxlength="100" required>
@@ -19,7 +19,7 @@
         </div>
 
         <div class="mb-3">
-            <label for="email" class="form-label">Email</label>
+            <label for="email" class="form-label">E-mail</label>
             <input type="email" id="email" name="email"
                    class="form-control {{if (index .Data.Errors "email")}}is-invalid{{end}}"
                    value="{{.Data.Form.Email}}" required>
@@ -38,6 +38,6 @@
             {{end}}
         </div>
 
-        <button type="submit" class="btn btn-primary">Отправить</button>
+        <button type="submit" class="btn btn-primary w-100">Отправить</button>
     </form>
 {{end}}
