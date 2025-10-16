@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	EnableMigrations = true                        // true → выполнять миграцию
+	EnableMigrations = false                       // true → выполнять миграцию
 	MigrationFile    = "migrations/001_schema.sql" // путь к файлу миграции
 )
 

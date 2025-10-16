@@ -24,7 +24,7 @@ const (
 
 // NewDB создаёт пул подключений к MySQL с продакшн-настройками
 // Инициализирует connection pool и проверяет подключение
-func NewDB(cfg core.Config) (*sqlx.DB, error) {
+func NewDB() (*sqlx.DB, error) {
 	dsn := getMySQLDSN()
 
 	// Подключение к MySQL

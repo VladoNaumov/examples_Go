@@ -20,13 +20,13 @@ import (
 )
 
 func main() {
-	// 1️⃣ Загружаем конфигурацию приложения и инициализируем логирование
-	cfg := core.Load()
-	log.Printf("INFO: Secure=%v, Env=%s", cfg.Secure, cfg.Env)
+	// 1️. Загружаем конфигурацию приложения и инициализируем логирование
+	config := core.Load()
+	log.Printf("INFO: Secure=%v, Env=%s", config.Secure, config.Env)
 	core.InitDailyLog()
 
-	// 2️⃣ Инициализируем подключение к MySQL с продакшн pool настройками
-	db, err := data.NewDB(cfg)
+	// 2️. Инициализируем подключение к MySQL с продакшн pool настройками
+	db, err := data.NewDB()
 	if err != nil {
 		core.LogError("Ошибка инициализации MySQL", map[string]interface{}{"error": err.Error()})
 		os.Exit(1)
@@ -56,20 +56,20 @@ func main() {
 	startLogRotation(ctx)
 
 	// 7. Инициализируем HTTP-обработчик с CSRF и DB в контексте
-	handler := initHandler(cfg, db) // ← Передаём db в initHandler
+	handler := initHandler(config, db) // ← Передаём db в initHandler
 
 	// 8. Создаём HTTP-сервер с безопасными таймаутами (OWASP A05)
-	srv := newHTTPServer(cfg, handler)
+	srv := newHTTPServer(config, handler)
 
 	// 9. Настраиваем перехват сигналов SIGINT/SIGTERM
 	sigs, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// 10. Запускаем HTTP-сервер
-	runServer(srv, cfg)
+	runServer(srv, config)
 
 	// 11. Ожидаем сигнал завершения
-	waitShutdown(sigs, srv, cfg)
+	waitShutdown(sigs, srv, config)
 }
 
 // startLogRotation запускает ротацию логов раз в сутки

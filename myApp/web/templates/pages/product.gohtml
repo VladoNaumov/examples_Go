@@ -1,0 +1,78 @@
+{{/* web/templates/pages/product.gohtml */}}
+{{define "content"}}
+    {{/*
+    Ожидается, что .Data — это структура:
+    type ProductView struct {
+      Name        string
+      Article     string // Artikkeli / SKU
+      Price       string // например "29,90 €"
+      ImageURL    string
+      Short       string
+      Description string
+      BackURL     string
+      Attributes  map[string]string
+    }
+  */}}
+
+    <main class="container py-4">
+        <div class="product-box">
+            <div class="row g-4">
+
+                <!-- Изображение -->
+                <div class="col-md-5 text-center">
+                    <img
+                            src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc2MDAnIGhlaWdodD0nNjAwJyB2aWV3Qm94PScwIDAgNjAwIDYwMCc+CiAgPGRlZnM+CiAgICA8bGluZWFyR3JhZGllbnQgaWQ9J2cnIHgxPScwJyB4Mj0nMCcgeTE9JzAnIHkyPScxJz4KICAgICAgPHN0b3Agb2Zmc2V0PScwJScgc3RvcC1jb2xvcj0nI2Y4ZjlmYScvPgogICAgICA8c3RvcCBvZmZzZXQ9JzEwMCUnIHN0b3AtY29sb3I9JyNlZGYyZjcnLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgPC9kZWZzPgogIDxyZWN0IHdpZHRoPSc2MDAnIGhlaWdodD0nNjAwJyBmaWxsPSd1cmwoI2cpJy8+CiAgPHJlY3QgeD0nMzAnIHk9JzMwJyB3aWR0aD0nNTQwJyBoZWlnaHQ9JzU0MCcgcng9JzI0JyByeT0nMjQnIGZpbGw9J25vbmUnIHN0cm9rZT0nI2NlZDRkYScgc3Ryb2tlLXdpZHRoPSczJyBzdHJva2UtZGFzaGFycmF5PSc4IDgnLz4KICA8ZyBmaWxsPSdub25lJyBzdHJva2U9JyNhZGI1YmQnIHN0cm9rZS13aWR0aD0nMTgnIHN0cm9rZS1saW5lY2FwPSdyb3VuZCcgc3Ryb2tlLWxpbmVqb2luPSdyb3VuZCcgdHJhbnNmb3JtPSd0cmFuc2xhdGUoMTUwLDE3MCknPgogICAgPHJlY3QgeD0nMTUnIHk9JzQwJyB3aWR0aD0nMjcwJyBoZWlnaHQ9JzIwMCcgcng9JzI0JyByeT0nMjQnIGZpbGw9JyNmZmYnIHN0cm9rZT0nI2RlZTJlNicvPgogICAgPGNpcmNsZSBjeD0nMTUwJyBjeT0nMTQwJyByPSc1OCcgZmlsbD0nbm9uZScgc3Ryb2tlPScjYWRiNWJkJy8+CiAgICA8cmVjdCB4PSc1MCcgeT0nMCcgd2lkdGg9JzYwJyBoZWlnaHQ9JzM2JyByeD0nOCcgcnk9JzgnIGZpbGw9JyNlOWVjZWYnIHN0cm9rZT0nI2NlZDRkYScvPgogIDwvZz4KICA8dGV4dCB4PSczMDAnIHk9JzUyMCcgdGV4dC1hbmNob3I9J21pZGRsZScgZm9udC1mYW1pbHk9Jy1hcHBsZS1zeXN0ZW0sQmxpbmtNYWNTeXN0ZW0sU2Vnb2UgVUksUm9ib3RvLEFyaWFsLHNhbnMtc2VyaWYnIGZvbnQtc2l6ZT0nMjgnIGZpbGw9JyM4NjhlOTYnPk5vIGltYWdlPC90ZXh0Pgo8L3N2Zz4="
+                            class="img-fluid product-img"
+                            alt="{{.Data.Name}}"
+                            style="width:100%; max-width:300px; height:auto; border-radius:8px; box-shadow:0 0 0 1px rgba(0,0,0,.05);">
+                    </div>
+
+                <!-- Информация -->
+                <div class="col-md-7">
+                    <h1 class="h5 mb-1">{{with .Data}}{{.Name}}{{end}}</h1>
+                    <div class="text-muted small mb-2">Artikkeli {{with .Data}}{{.Article}}{{end}}</div>
+                    <div class="price mb-3">{{with .Data}}{{.Price}}{{end}}</div>
+
+                    <p class="mb-3">{{with .Data}}{{.Short}}{{end}}</p>
+
+                    <!-- Форма добавления в корзину -->
+                    <form method="post" action="/cart/add" class="row g-2 align-items-center mb-3">
+                        {{.CSRFField}}
+                        <div class="col-auto">
+                            <label for="qty" class="col-form-label small">Кол-во</label>
+                        </div>
+                        <div class="col-auto">
+                            <input type="number" id="qty" name="qty" value="1" min="1"
+                                   class="form-control form-control-sm" style="width:80px;">
+                        </div>
+                        <input type="hidden" name="sku" value="{{with .Data}}{{.Article}}{{end}}">
+                        <div class="col-auto">
+                            <button class="btn btn-sm btn-primary px-3" type="submit">Добавить</button>
+                            <a href="{{with .Data}}{{.BackURL}}{{end}}" class="btn btn-sm btn-outline-secondary">Назад</a>
+                        </div>
+                    </form>
+
+                    <hr class="my-3">
+
+                    <h6 class="fw-semibold mb-2">Описание</h6>
+                    <p class="mb-2">{{with .Data}}{{.Description}}{{end}}</p>
+
+                    <h6 class="fw-semibold mt-3 mb-2">Характеристики</h6>
+                    <table class="table table-sm mb-0">
+                        <tbody>
+                        {{with .Data}}
+                            {{range $k, $v := .Attributes}}
+                                <tr>
+                                    <th>{{$k}}</th>
+                                    <td>{{$v}}</td>
+                                </tr>
+                            {{end}}
+                        {{end}}
+                        </tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>
+    </main>
+{{end}}

@@ -1,14 +1,15 @@
 // internal/data/products.go
+
 package data
 
 import (
 	"context"
+	"myApp/internal/core"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
-// Добавить поле CategoryID
 type Product struct {
 	ID         string    `db:"id" json:"id"`
 	CategoryID *string   `db:"category_id" json:"category_id,omitempty"`
@@ -22,13 +23,16 @@ type Product struct {
 // ListAllProducts с JOIN на категории
 func ListAllProducts(ctx context.Context, db *sqlx.DB) ([]Product, error) {
 	const q = `
-		SELECT p.id, p.name, p.article, p.price, p.image_alt, p.created_at
+		SELECT p.id, p.name, p.price, p.image_alt
 		FROM products p
 		ORDER BY p.name ASC`
 
 	var items []Product
 	if err := db.SelectContext(ctx, &items, q); err != nil {
-		return nil, err
+		core.LogError("list all products", map[string]interface{}{
+			"query": q,
+			"error": err.Error(),
+		})
 	}
 	return items, nil
 }

@@ -8,7 +8,7 @@ import (
 	"net/http"
 
 	"myApp/internal/core"
-	"myApp/internal/data" // ← Добавлен импорт data для DB middleware
+	"myApp/internal/data"
 	"myApp/internal/http/handler"
 	mw "myApp/internal/http/middleware"
 	"myApp/internal/view"
@@ -16,7 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/gorilla/csrf"
-	"github.com/jmoiron/sqlx" // ← Импорт sqlx для типизации DB
+	"github.com/jmoiron/sqlx"
 )
 
 // New — собирает HTTP-роутер из модулей (middleware, DB, маршруты, шаблоны)
@@ -129,8 +129,9 @@ func registerRoutes(r *chi.Mux, tpl *view.Templates) {
 	r.Get("/about", handler.About(tpl))
 	r.Get("/form", handler.FormIndex(tpl))
 	r.Post("/form", handler.FormSubmit(tpl))
-	r.Get("/healthz", handler.Health)
+	r.Get("/health", handler.Health)
 	r.Get("/catalog", handler.Catalog(tpl))
+	r.HandleFunc("/product", handler.Product(tpl))
 	r.NotFound(handler.NotFound(tpl))
 }
 

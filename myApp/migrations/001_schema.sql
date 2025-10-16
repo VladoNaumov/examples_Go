@@ -11,12 +11,12 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 -- Создаём таблицу с нужными полями (без индексов)
 CREATE TABLE products (
-                          id          INT AUTO_INCREMENT PRIMARY KEY,
-                          name        VARCHAR(255) NOT NULL,
-                          article     VARCHAR(100) NOT NULL,
-                          price       DECIMAL(10,2) NOT NULL,
-                          image_alt   VARCHAR(255),
-                          created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+ id          INT AUTO_INCREMENT PRIMARY KEY,
+ name        VARCHAR(255) NOT NULL,
+ article     VARCHAR(100) NOT NULL,
+ price       DECIMAL(10,2) NOT NULL,
+ image_alt   VARCHAR(255),
+ created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Заполняем заново (одним INSERT с несколькими значениями)

@@ -75,7 +75,7 @@ func newLevelSplitWriter(mainW, errW, outW io.Writer) *levelSplitWriter {
 	return &levelSplitWriter{mainW: mainW, errW: errW, outW: outW}
 }
 
-// Write записывает лог: ERROR только в файл, INFO в файл+консоль
+// Write записывает лог: ERROR только в файл, INFO в файл
 func (w *levelSplitWriter) Write(p []byte) (int, error) {
 	level := detectLevel(p)
 
@@ -96,7 +96,7 @@ func (w *levelSplitWriter) Write(p []byte) (int, error) {
 		}
 	default: // INFO и остальное
 		if w.mainW != nil {
-			_, _ = w.mainW.Write(p) // INFO в основной лог
+			_, _ = w.mainW.Write(p)
 			return len(p), nil
 		}
 	}

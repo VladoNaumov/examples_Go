@@ -1,6 +1,5 @@
 package view
 
-//view.go
 import (
 	"fmt"
 	"html/template"
@@ -11,35 +10,52 @@ import (
 	"github.com/gorilla/csrf"
 )
 
-// Templates хранит предварительно загруженные HTML-шаблоны
+// 🔧 Шаблонная система приложения (View Layer)
+
+// Этот пакет отвечает за работу с HTML-шаблонами:
+//  • парсинг (однократная загрузка файлов)
+//  • рендеринг страниц
+//  • внедрение CSRF-токена и CSP nonce для защиты
+
+// 🧩 Templates — хранилище всех HTML-шаблонов в памяти
 type Templates struct {
-	templates map[string]*template.Template // Карта шаблонов по именам
+	templates map[string]*template.Template // ключ — имя страницы
 }
 
-// PageData определяет данные для рендеринга шаблонов
+// 📦 PageData — структура, передаваемая в шаблоны
 type PageData struct {
 	Title     string        // Заголовок страницы
-	CSRFField template.HTML // Поле CSRF-токена
-	Nonce     string        // Nonce для Content Security Policy
-	Data      interface{}   // Дополнительные данные для шаблона
+	CSRFField template.HTML // Скрытое поле <input> с CSRF-токеном
+	Nonce     string        // CSP nonce — случайный токен для защиты inline-скриптов
+	Data      interface{}   // Пользовательские данные (формы, товары и т.д.)
 }
 
-// New инициализирует шаблоны из файлов
+// Инициализация шаблонов
+
+// New — парсит layout, partials и страницы один раз при старте приложения.
+// Возвращает готовую структуру Templates со всеми шаблонами.
 func New() (*Templates, error) {
+	// Общие layout и частичные шаблоны, которые подключаются ко всем страницам
 	layouts := []string{
 		"web/templates/layouts/base.gohtml",
 		"web/templates/partials/nav.gohtml",
 		"web/templates/partials/footer.gohtml",
 	}
+
+	// Карта всех страниц и их файлов
 	pages := map[string][]string{
 		"home":     {"web/templates/pages/home.gohtml"},
 		"about":    {"web/templates/pages/about.gohtml"},
 		"form":     {"web/templates/pages/form.gohtml"},
-		"catalog":  {"web/templates/pages/catalog.gohtml"}, // Добавлен catalog
+		"catalog":  {"web/templates/pages/catalog.gohtml"},
+		"product":  {"web/templates/pages/product.gohtml"},
 		"notfound": {"web/templates/pages/404.gohtml"},
 	}
 
+	// Контейнер для всех шаблонов
 	t := &Templates{templates: make(map[string]*template.Template)}
+
+	// Парсим каждый шаблон страницы вместе с layout
 	for name, pageFiles := range pages {
 		files := append(layouts, pageFiles...)
 		tpl, err := template.ParseFiles(files...)
@@ -48,12 +64,23 @@ func New() (*Templates, error) {
 		}
 		t.templates[name] = tpl
 	}
+
 	return t, nil
 }
 
-// Render рендерит шаблон с данными, включая CSRF-токен и nonce
-// Возвращает error для обработки в handlers
-func (t *Templates) Render(w http.ResponseWriter, r *http.Request, templateName string, title string, data interface{}) error {
+// 🎨 Рендеринг HTML-шаблонов
+
+// Render — безопасно отрисовывает HTML-шаблон и добавляет CSRF и CSP-защиту.
+// Используется всеми HTTP-обработчиками (handlers).
+func (t *Templates) Render(
+	w http.ResponseWriter,
+	r *http.Request,
+	templateName string, // имя шаблона (например, "home" или "form")
+	title string, // заголовок страницы
+	data interface{}, // любые пользовательские данные
+) error {
+
+	// 1️ Проверяем, что нужный шаблон существует
 	tpl, ok := t.templates[templateName]
 	if !ok {
 		core.LogError("Шаблон не найден", map[string]interface{}{
@@ -63,6 +90,8 @@ func (t *Templates) Render(w http.ResponseWriter, r *http.Request, templateName 
 		return fmt.Errorf("шаблон не найден: %s", templateName)
 	}
 
+	// 2️ Извлекаем CSP nonce (одноразовый токен) из контекста запроса
+	//    Он нужен для того, чтобы браузер выполнял только безопасные inline-скрипты
 	nonce, _ := r.Context().Value(core.CtxNonce).(string)
 	if nonce == "" {
 		core.LogError("Nonce не найден в контексте", nil)
@@ -70,14 +99,19 @@ func (t *Templates) Render(w http.ResponseWriter, r *http.Request, templateName 
 		return fmt.Errorf("nonce не найден")
 	}
 
+	// 3️ Устанавливаем заголовок Content-Type
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	if err := tpl.ExecuteTemplate(w, "base", PageData{
+	// 4️ Формируем данные, передаваемые в шаблон
+	page := PageData{
 		Title:     title,
-		CSRFField: csrf.TemplateField(r),
-		Nonce:     nonce,
-		Data:      data,
-	}); err != nil {
+		CSRFField: csrf.TemplateField(r), // добавляем скрытый CSRF <input>
+		Nonce:     nonce,                 // передаём CSP nonce
+		Data:      data,                  // любые пользовательские данные
+	}
+
+	// 5️ Рендерим шаблон base, в который вложены partials и конкретная страница
+	if err := tpl.ExecuteTemplate(w, "base", page); err != nil {
 		core.LogError("Ошибка рендеринга шаблона", map[string]interface{}{
 			"template": templateName,
 			"error":    err.Error(),
@@ -86,5 +120,19 @@ func (t *Templates) Render(w http.ResponseWriter, r *http.Request, templateName 
 		return fmt.Errorf("рендеринг шаблона %s: %w", templateName, err)
 	}
 
-	return nil // Успешно отрендерено
+	return nil // Всё прошло успешно
 }
+
+// 🧠 Кратко о том, как это работает
+//
+// 1. При запуске сервера → вызывается view.New(), шаблоны загружаются в память.
+// 2. Каждый handler вызывает tpl.Render(w, r, "имя", "заголовок", data).
+// 3. Render добавляет:
+//      - CSRF-токен (gorilla/csrf)
+//      - CSP nonce (для защиты inline-скриптов)
+//      - Заголовок Content-Type
+// 4. Шаблон "base.gohtml" получает PageData и отрисовывает:
+//      {{ .Title }}        → Заголовок страницы
+//      {{ .CSRFField }}    → <input type="hidden" name="_csrf" ...>
+//      {{ .Nonce }}        → nonce в meta-тегах CSP
+//      {{ .Data }}         → твои данные (форма, товары и т.д.)
