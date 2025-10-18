@@ -27,33 +27,6 @@ func (e *AppError) Error() string {
 // Unwrap возвращает вложенную ошибку для обработки цепочки ошибок
 func (e *AppError) Unwrap() error { return e.Err }
 
-// BadRequest создаёт ошибку для некорректного запроса (HTTP 400) (OWASP A05)
-func BadRequest(msg string, fields map[string]string) *AppError {
-	// Ограничивает количество полей ошибок для предотвращения перегрузки
-	if len(fields) > 10 {
-		fields = map[string]string{"form": "Слишком много ошибок валидации"}
-	}
-	return &AppError{Code: "bad_request", Status: http.StatusBadRequest, Message: msg, Fields: fields}
-}
-
-// NotFound создаёт ошибку для ресурса, который не найден (HTTP 404) (OWASP A05)
-// Примечание: не используется, так как 404 обрабатывается через handler.NotFound с рендером шаблона
-func NotFound(msg string) *AppError {
-	return &AppError{Code: "not_found", Status: http.StatusNotFound, Message: msg}
-}
-
-// Forbidden создаёт ошибку для запрета доступа (HTTP 403) (OWASP A05)
-// Примечание: не используется, так как в проекте нет логики ограничения доступа
-func Forbidden(msg string) *AppError {
-	return &AppError{Code: "forbidden", Status: http.StatusForbidden, Message: msg}
-}
-
-// Unauthorized создаёт ошибку для неавторизованного доступа (HTTP 401) (OWASP A05)
-// Примечание: не используется, так как в проекте нет аутентификации
-func Unauthorized(msg string) *AppError {
-	return &AppError{Code: "unauthorized", Status: http.StatusUnauthorized, Message: msg}
-}
-
 // Internal создаёт ошибку для внутренней серверной ошибки (HTTP 500) (OWASP A05)
 func Internal(msg string, err error) *AppError {
 	return &AppError{Code: "internal", Status: http.StatusInternalServerError, Message: msg, Err: err}

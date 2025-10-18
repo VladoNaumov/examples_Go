@@ -22,10 +22,10 @@ func SecureHeaders() func(http.Handler) http.Handler {
 			// Настраивает Content Security Policy с поддержкой nonce
 			csp := "" +
 				"default-src 'self'; " +
-				"img-src 'self' data:; " +
+				"img-src 'self' storage:; " +
 				"style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline' 'nonce-" + nonce + "'; " +
 				"script-src 'self' https://cdn.jsdelivr.net 'nonce-" + nonce + "'; " +
-				"font-src 'self' https://cdn.jsdelivr.net data:; " +
+				"font-src 'self' https://cdn.jsdelivr.net storage:; " +
 				"connect-src 'self' https://cdn.jsdelivr.net; " +
 				"form-action 'self'; " +
 				"frame-ancestors 'none'; " +

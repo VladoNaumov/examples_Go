@@ -149,6 +149,5 @@ func FormSubmit(tpl *view.Templates) http.HandlerFunc {
 
 		// PRG-паттерн: перенаправляем на форму с флагом успеха
 		http.Redirect(w, r, "/form?ok=1", http.StatusSeeOther)
-		return
 	}
 }

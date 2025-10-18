@@ -8,9 +8,9 @@ import (
 	"net/http"
 
 	"myApp/internal/core"
-	"myApp/internal/data"
 	"myApp/internal/http/handler"
 	mw "myApp/internal/http/middleware"
+	"myApp/internal/storage"
 	"myApp/internal/view"
 
 	"github.com/go-chi/chi/v5"
@@ -49,12 +49,12 @@ func initTemplates() (*view.Templates, error) {
 /* ---------- Database Middleware ---------- */
 
 // useDatabaseMiddleware — добавляет *sqlx.DB в контекст каждого запроса
-// DB доступен во всех handlers через data.GetDBFromContext()
+// DB доступен во всех handlers через storage.GetDBFromContext()
 func useDatabaseMiddleware(r *chi.Mux, db *sqlx.DB) {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Помещает DB в контекст запроса через data.CtxDBKey
-			ctx := context.WithValue(r.Context(), data.CtxDBKey{}, db)
+			// Помещает DB в контекст запроса через storage.CtxDBKey
+			ctx := context.WithValue(r.Context(), storage.CtxDBKey{}, db)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})
@@ -126,12 +126,17 @@ func serveStatic(r *chi.Mux) {
 // Все handlers получают DB из контекста автоматически
 func registerRoutes(r *chi.Mux, tpl *view.Templates) {
 	r.Get("/", handler.Home(tpl))
-	r.Get("/about", handler.About(tpl))
+	r.Get("/catalog", handler.Catalog(tpl))
+	r.Get("/product/{id}", handler.Product(tpl))
+
 	r.Get("/form", handler.FormIndex(tpl))
 	r.Post("/form", handler.FormSubmit(tpl))
-	r.Get("/health", handler.Health)
-	r.Get("/catalog", handler.Catalog(tpl))
-	r.HandleFunc("/product", handler.Product(tpl))
+
+	r.Get("/about", handler.About(tpl))
+
+	r.Get("/debug", handler.Debug)
+	r.Get("/catalog/json", handler.CatalogJSON())
+
 	r.NotFound(handler.NotFound(tpl))
 }
 

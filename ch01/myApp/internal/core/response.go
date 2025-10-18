@@ -17,11 +17,6 @@ func JSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// NoContent отправляет ответ с HTTP 204 (No Content)
-func NoContent(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ProblemDetail определяет структуру ответа об ошибке в формате RFC 7807 (OWASP A04: Design Flaws)
 type ProblemDetail struct {
 	Type     string            `json:"type"`             // Тип ошибки (URI)

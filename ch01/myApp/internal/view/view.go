@@ -48,7 +48,7 @@ func New() (*Templates, error) {
 		"about":    {"web/templates/pages/about.gohtml"},
 		"form":     {"web/templates/pages/form.gohtml"},
 		"catalog":  {"web/templates/pages/catalog.gohtml"},
-		"product":  {"web/templates/pages/product.gohtml"},
+		"product":  {"web/templates/pages/show_product.gohtml"},
 		"notfound": {"web/templates/pages/404.gohtml"},
 	}
 
@@ -126,7 +126,7 @@ func (t *Templates) Render(
 // 🧠 Кратко о том, как это работает
 //
 // 1. При запуске сервера → вызывается view.New(), шаблоны загружаются в память.
-// 2. Каждый handler вызывает tpl.Render(w, r, "имя", "заголовок", data).
+// 2. Каждый handler вызывает tpl.Render(w, r, "имя", "заголовок", storage).
 // 3. Render добавляет:
 //      - CSRF-токен (gorilla/csrf)
 //      - CSP nonce (для защиты inline-скриптов)
@@ -134,5 +134,5 @@ func (t *Templates) Render(
 // 4. Шаблон "base.gohtml" получает PageData и отрисовывает:
 //      {{ .Title }}        → Заголовок страницы
 //      {{ .CSRFField }}    → <input type="hidden" name="_csrf" ...>
-//      {{ .Nonce }}        → nonce в meta-тегах CSP
+//      {{ .Nonce }}        → nonce в meta-тегах CSP (.Nonce — это одноразовый токен (random string), который вставляется в HTML-страницу для защиты от XSS-атак).
 //      {{ .Data }}         → твои данные (форма, товары и т.д.)

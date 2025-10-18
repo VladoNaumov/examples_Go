@@ -5,21 +5,21 @@ import (
 	"net/http"
 
 	"myApp/internal/core"
-	"myApp/internal/data"
+	"myApp/internal/storage"
 	"myApp/internal/view"
 )
 
 // Catalog отображает каталог товаров из MySQL
 func Catalog(tpl *view.Templates) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		db := data.GetDBFromContext(r.Context())
+		db := storage.GetDBFromContext(r.Context())
 		if db == nil {
 			core.LogError("DB недоступна в контексте", nil)
 			core.Fail(w, r, core.Internal("Внутренняя ошибка", nil))
 			return
 		}
 
-		items, err := data.ListAllProducts(r.Context(), db)
+		items, err := storage.ListAllProducts(r.Context(), db)
 		if err != nil {
 			core.LogError("Ошибка загрузки каталога", map[string]interface{}{
 				"error": err.Error(),

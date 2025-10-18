@@ -14,7 +14,7 @@ import (
 
 	"myApp/internal/app"
 	"myApp/internal/core"
-	"myApp/internal/data"
+	"myApp/internal/storage"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -26,20 +26,20 @@ func main() {
 	core.InitDailyLog()
 
 	// 2️. Инициализируем подключение к MySQL с продакшн pool настройками
-	db, err := data.NewDB()
+	db, err := storage.NewDB()
 	if err != nil {
 		core.LogError("Ошибка инициализации MySQL", map[string]interface{}{"error": err.Error()})
 		os.Exit(1)
 	}
 	// Закрываем DB при завершении приложения (graceful shutdown)
 	defer func() {
-		if cerr := data.Close(db); cerr != nil {
+		if cerr := storage.Close(db); cerr != nil {
 			core.LogError("Ошибка закрытия MySQL", map[string]interface{}{"error": cerr.Error()})
 		}
 	}()
 
 	// 3. Выполнить миграции
-	migrations := data.NewMigrations(db)
+	migrations := storage.NewMigrations(db)
 	if err := migrations.RunMigrations(); err != nil {
 		core.LogError("Ошибка выполнения миграций", map[string]interface{}{"error": err.Error()})
 		os.Exit(1)
