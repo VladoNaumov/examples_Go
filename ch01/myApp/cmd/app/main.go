@@ -1,6 +1,6 @@
 package main
 
-//main.go
+//main.go.go
 import (
 	"context"
 	"crypto/sha256"
