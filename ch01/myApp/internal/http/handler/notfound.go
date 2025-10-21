@@ -4,20 +4,24 @@ import (
 	"myApp/internal/core"
 	"myApp/internal/view"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
-// NotFound возвращает обработчик для страницы 404 (OWASP A03)
-func NotFound(tpl *view.Templates) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Устанавливаем статус 404
-		w.WriteHeader(http.StatusNotFound)
+// NotFound — страница 404 (OWASP A03)
+func NotFound(tpl *view.Templates) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Ставим 404 до рендера (чтобы статус ушёл даже если шаблон успешен)
+		c.Status(http.StatusNotFound)
 
-		// Рендерим шаблон "notfound" с обработкой ошибки
-		if err := tpl.Render(w, r, "notfound", "Страница не найдена", nil); err != nil {
+		if err := tpl.Render(c, "notfound", "Страница не найдена", nil); err != nil {
 			core.LogError("Ошибка рендеринга шаблона notfound", map[string]interface{}{
 				"error": err.Error(),
-				"path":  r.URL.Path,
+				"path":  c.Request.URL.Path,
 			})
+			// Фолбэк, если шаблон упал
+			c.String(http.StatusInternalServerError, "Ошибка отображения страницы")
+			return
 		}
 	}
 }

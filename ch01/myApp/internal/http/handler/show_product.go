@@ -1,5 +1,6 @@
 package handler
 
+// product.go (Gin)
 import (
 	"database/sql"
 	"errors"
@@ -10,57 +11,66 @@ import (
 	"myApp/internal/storage"
 	"myApp/internal/view"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 )
 
-// Product — детальная страница товара, архитектура как в Catalog
-func Product(tpl *view.Templates) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Извлекаем DB из контекста (как в Catalog)
-		db := storage.GetDBFromContext(r.Context())
+// Product — детальная страница товара
+func Product(tpl *view.Templates) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 1) Достаём DB из контекста (кладётся в middleware withNonceAndDB)
+		db := storage.GetDBFromContext(c.Request.Context())
 		if db == nil {
 			core.LogError("DB недоступна в контексте", nil)
-			core.Fail(w, r, core.Internal("Внутренняя ошибка", nil))
+			core.FailC(c, core.Internal("Внутренняя ошибка", nil))
 			return
 		}
 
-		// 2. Извлекаем ID из URL
-		idStr := chi.URLParam(r, "id")
+		// 2) Берём :id из маршрута (/product/:id) и валидируем
+		idStr := c.Param("id")
 		id, err := strconv.Atoi(idStr)
-		if err != nil {
+		if err != nil || id <= 0 {
 			core.LogError("Неверный ID товара", map[string]interface{}{
 				"id":    idStr,
-				"error": err.Error(),
+				"error": err,
 			})
-			core.Fail(w, r, core.Internal("Неверный ID товара", err))
+			// 400 Bad Request в формате RFC7807
+			core.FailC(c, &core.AppError{
+				Code:    "bad_request",
+				Status:  http.StatusBadRequest,
+				Message: "Неверный ID товара",
+				Err:     err,
+			})
 			return
 		}
 
-		product, err := storage.GetProductByID(r.Context(), db, id)
+		// 3) Достаём товар из БД
+		product, err := storage.GetProductByID(c.Request.Context(), db, id)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				core.LogError("Товар не найден", map[string]interface{}{
-					"id": id,
+				core.LogError("Товар не найден", map[string]interface{}{"id": id})
+				// 404 Not Found в формате RFC7807
+				core.FailC(c, &core.AppError{
+					Code:    "not_found",
+					Status:  http.StatusNotFound,
+					Message: "Товар не найден",
 				})
-				core.Fail(w, r, core.Internal("Товар не найден", nil))
 				return
 			}
 			core.LogError("Ошибка загрузки товара", map[string]interface{}{
 				"id":    id,
 				"error": err.Error(),
 			})
-			core.Fail(w, r, core.Internal("Ошибка товара", err))
+			core.FailC(c, core.Internal("Ошибка загрузки товара", err))
 			return
 		}
 
-		// 4. Рендерим как в Catalog
-		err = tpl.Render(w, r, "product", product.Name, product)
-		if err != nil {
+		// 4) Рендерим шаблон "product" (заголовок — имя товара)
+		if err := tpl.Render(c, "product", product.Name, product); err != nil {
 			core.LogError("Ошибка рендеринга product", map[string]interface{}{
 				"id":    id,
 				"error": err.Error(),
 			})
-			core.Fail(w, r, core.Internal("Ошибка отображения", err))
+			core.FailC(c, core.Internal("Ошибка отображения", err))
 			return
 		}
 	}

@@ -25,7 +25,9 @@ func (e *AppError) Error() string {
 }
 
 // Unwrap возвращает вложенную ошибку для обработки цепочки ошибок
-func (e *AppError) Unwrap() error { return e.Err }
+func (e *AppError) Unwrap() error {
+	return e.Err
+}
 
 // Internal создаёт ошибку для внутренней серверной ошибки (HTTP 500) (OWASP A05)
 func Internal(msg string, err error) *AppError {

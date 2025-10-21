@@ -1,19 +1,21 @@
 package handler
 
-//debug_json.go
 import (
 	"net/http"
 
 	"myApp/internal/core"
+
+	"github.com/gin-gonic/gin"
 )
 
-func Debug(w http.ResponseWriter, r *http.Request) {
+// Debug — возвращает отладочную информацию в JSON
+func Debug(c *gin.Context) {
 	info := map[string]interface{}{
 		"request": map[string]interface{}{
-			"method":  r.Method,
-			"url":     r.URL.String(),
-			"headers": r.Header,
-			"remote":  r.RemoteAddr,
+			"method":  c.Request.Method,
+			"url":     c.Request.URL.String(),
+			"headers": c.Request.Header,
+			"remote":  c.Request.RemoteAddr,
 		},
 		"response": map[string]interface{}{
 			"content_type": "application/json",
@@ -22,5 +24,5 @@ func Debug(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	core.JSON(w, http.StatusOK, info)
+	core.JSON(c, http.StatusOK, info)
 }

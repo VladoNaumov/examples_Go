@@ -1,25 +1,32 @@
 package handler
 
-//home.go
 import (
-	"myApp/internal/core"
 	"net/http"
 
+	"myApp/internal/core"
 	"myApp/internal/view"
+
+	"github.com/gin-gonic/gin"
 )
 
-// Home возвращает обработчик для главной страницы (OWASP A03: Injection)
-func Home(tpl *view.Templates) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Рендерим шаблон "home" с заголовком
-		if err := tpl.Render(w, r, "home", "Главная", nil); err != nil {
+// Home — обработчик главной страницы (OWASP A03: Injection)
+func Home(tpl *view.Templates) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Пример данных для шаблона (можешь убрать/заменить)
+		data := map[string]any{
+			"Welcome": "Добро пожаловать в магазин!",
+			"Lang":    "ru",
+		}
+
+		// Рендерим шаблон "home"
+		if err := tpl.Render(c, "home", "Главная", data); err != nil {
 			core.LogError("Ошибка рендеринга шаблона home", map[string]interface{}{
 				"error": err.Error(),
-				"path":  r.URL.Path,
+				"path":  c.Request.URL.Path,
 			})
 
-			// В случае ошибки — стандартный ответ
-			http.Error(w, "Ошибка отображения страницы", http.StatusInternalServerError)
+			// Отдаём 500 — стандартный ответ
+			c.String(http.StatusInternalServerError, "Ошибка отображения страницы")
 			return
 		}
 	}

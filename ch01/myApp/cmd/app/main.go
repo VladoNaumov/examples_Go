@@ -1,148 +1,129 @@
 package main
 
-//main.go.go
+// main.go — точка входа приложения myApp
+
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"myApp/internal/app"
 	"myApp/internal/core"
 	"myApp/internal/storage"
 
-	"github.com/jmoiron/sqlx"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 func main() {
-	// 1️. Загружаем конфигурацию приложения и инициализируем логирование
-	config := core.Load()
-	log.Printf("INFO: Secure=%v, Env=%s", config.Secure, config.Env)
+	// Загружаем конфиг (из .env, переменных окружения или файла)
+	cfg := core.Load()
+
+	// Логируем старт с параметрами окружения
+	core.LogInfo("Приложение запущено", map[string]interface{}{
+		"env":    cfg.Env,    // режим: dev / prod
+		"addr":   cfg.Addr,   // адрес HTTP-сервера
+		"secure": cfg.Secure, // HTTPS включён или нет
+		"app":    cfg.AppName,
+	})
+
+	// Инициализируем ежедневный лог-файл (по дате)
 	core.InitDailyLog()
 
-	// 2️. Инициализируем подключение к MySQL с продакшн pool настройками
+	// Подключаем базу данных (sqlx.DB)
 	db, err := storage.NewDB()
 	if err != nil {
-		core.LogError("Ошибка инициализации MySQL", map[string]interface{}{"error": err.Error()})
+		core.LogError("Ошибка БД", map[string]interface{}{"error": err})
 		os.Exit(1)
 	}
-	// Закрываем DB при завершении приложения (graceful shutdown)
-	defer func() {
-		if cerr := storage.Close(db); cerr != nil {
-			core.LogError("Ошибка закрытия MySQL", map[string]interface{}{"error": cerr.Error()})
-		}
-	}()
 
-	// 3. Выполнить миграции
+	// Запускаем миграции, если есть (обновление структуры БД)
 	migrations := storage.NewMigrations(db)
 	if err := migrations.RunMigrations(); err != nil {
-		core.LogError("Ошибка выполнения миграций", map[string]interface{}{"error": err.Error()})
+		core.LogError("Ошибка миграций", map[string]interface{}{"error": err})
 		os.Exit(1)
 	}
 
-	// 4. Закрываем файлы логов при завершении приложения
-	defer core.Close()
+	// Генерируем или производим derivation CSRF-ключа (32 байта)
+	// Используется для защиты форм и сессий
+	csrfKey := deriveSecureKey(cfg.CSRFKey)
 
-	// 5. Создаём контекст для фоновых задач (ротация логов)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Инициализируем приложение (Gin, middleware, маршруты)
+	handler, err := app.New(cfg, db, csrfKey)
+	if err != nil {
+		core.LogError("Ошибка app.New", map[string]interface{}{"error": err})
+		os.Exit(1)
+	}
 
-	// 6. Запускаем ежедневную ротацию логов
-	startLogRotation(ctx)
+	// Создаём HTTP-сервер с таймаутами
+	srv := newHTTPServer(cfg, handler)
 
-	// 7. Инициализируем HTTP-обработчик с CSRF и DB в контексте
-	handler := initHandler(config, db) // ← Передаём db в initHandler
-
-	// 8. Создаём HTTP-сервер с безопасными таймаутами (OWASP A05)
-	srv := newHTTPServer(config, handler)
-
-	// 9. Настраиваем перехват сигналов SIGINT/SIGTERM
+	// Создаём контекст, который будет отменён при сигнале SIGINT/SIGTERM
+	// (нужно для graceful shutdown)
 	sigs, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 10. Запускаем HTTP-сервер
-	runServer(srv, config)
+	// Запускаем сервер в отдельной горутине
+	go runServer(srv, cfg)
 
-	// 11. Ожидаем сигнал завершения
-	waitShutdown(sigs, srv, config)
-}
+	// Ждём сигнал завершения (Ctrl+C или systemd stop)
+	<-sigs.Done()
+	core.LogInfo("Завершение...", nil)
 
-// startLogRotation запускает ротацию логов раз в сутки
-func startLogRotation(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				core.InitDailyLog()
-			}
-		}
-	}()
-}
-
-// initHandler создаёт обработчик приложения с CSRF-защитой и DB middleware
-// Отвечает за инициализацию app с передачей DB для handlers
-func initHandler(cfg core.Config, db *sqlx.DB) http.Handler {
-	// Передаём db в app.New для middleware и handlers
-	handler, err := app.New(cfg, db, derive32(cfg.CSRFKey)) // ← Добавлен db параметр
-	if err != nil {
-		core.LogError("Ошибка инициализации приложения", map[string]interface{}{"error": err.Error()})
-		os.Exit(1)
+	// Плавно останавливаем сервер
+	if err := srv.Shutdown(context.Background()); err != nil {
+		core.LogError("Ошибка shutdown", map[string]interface{}{"error": err})
 	}
-	return handler
+
+	// Закрываем соединение с БД
+	_ = storage.Close(db)
+
+	// Закрываем логи, если нужно
+	core.Close()
 }
 
-// newHTTPServer создаёт HTTP-сервер с таймаутами (OWASP A05)
+// newHTTPServer — создаёт http.Server с параметрами из конфига
 func newHTTPServer(cfg core.Config, h http.Handler) *http.Server {
 	return &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           h,
-		ReadHeaderTimeout: cfg.ReadHeaderTimeout,
-		ReadTimeout:       cfg.ReadTimeout,
-		WriteTimeout:      cfg.WriteTimeout,
-		IdleTimeout:       cfg.IdleTimeout,
+		Addr:              cfg.Addr,              // адрес (например ":8080")
+		Handler:           h,                     // обработчик (Gin engine)
+		ReadHeaderTimeout: cfg.ReadHeaderTimeout, // таймаут заголовков
+		ReadTimeout:       cfg.ReadTimeout,       // общий таймаут чтения
+		WriteTimeout:      cfg.WriteTimeout,      // таймаут записи
+		IdleTimeout:       cfg.IdleTimeout,       // таймаут keep-alive
 	}
 }
 
-// gracefulShutdown выполняет корректное завершение HTTP сервера
-func gracefulShutdown(srv *http.Server, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	return srv.Shutdown(ctx)
-}
-
-// runServer запускает HTTP-сервер в горутине
+// runServer — запускает сервер и логирует падения
 func runServer(srv *http.Server, cfg core.Config) {
-	go func() {
-		log.Printf("INFO: http: сервер запущен, addr=%s, env=%s, app=%s", cfg.Addr, cfg.Env, cfg.AppName)
-		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-			core.LogError("Ошибка работы сервера", map[string]interface{}{"error": err.Error()})
-			os.Exit(1)
-		}
-	}()
-}
+	core.LogInfo("Сервер запущен", map[string]interface{}{"addr": cfg.Addr})
 
-// waitShutdown ожидает сигнал завершения и shutdown сервера
-func waitShutdown(sigs context.Context, srv *http.Server, cfg core.Config) {
-	<-sigs.Done()
-	log.Println("INFO: http: начат процесс завершения")
-	if err := gracefulShutdown(srv, cfg.ShutdownTimeout); err != nil {
-		core.LogError("Ошибка завершения сервера", map[string]interface{}{"error": err.Error()})
-	} else {
-		log.Println("INFO: http: завершение выполнено")
+	// Запускаем HTTP-сервер
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		// Если ошибка не "сервер закрыт" — это краш
+		core.LogError("Сервер упал", map[string]interface{}{"error": err})
+		os.Exit(1)
 	}
 }
 
-// derive32 генерирует 32-байтовый ключ CSRF из секрета (OWASP A02)
-func derive32(secret string) []byte {
-	sum := sha256.Sum256([]byte(secret))
-	return sum[:]
+// deriveSecureKey — генерирует 32-байтовый криптографически стойкий ключ для CSRF, если secret пустой — создаёт новый.
+func deriveSecureKey(secret string) []byte {
+	if len(secret) == 0 {
+		// Если в конфиге нет ключа — генерируем случайный
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			// Сюда почти никогда не попадём (rand.Read редко падает)
+			panic("unable to generate random bytes: " + err.Error())
+		}
+		return b
+	}
+
+	// Если ключ задан, "растягиваем" его через PBKDF2
+	// — безопасный способ получить ключ фиксированной длины
+	salt := []byte("myapp-session-salt")
+	return pbkdf2.Key([]byte(secret), salt, 4096, 32, sha256.New)
 }

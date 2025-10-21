@@ -1,23 +1,24 @@
 package handler
 
-//about.go
+// about.go
 import (
-	"myApp/internal/core"
 	"net/http"
 
+	"myApp/internal/core"
 	"myApp/internal/view"
+
+	"github.com/gin-gonic/gin"
 )
 
-// About возвращает обработчик для страницы "О нас" (OWASP A03: Injection)
-func About(tpl *view.Templates) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Рендерим шаблон "about" с заголовком
-		if err := tpl.Render(w, r, "about", "О нас", nil); err != nil {
+// About — обработчик страницы "О нас" (OWASP A03: Injection)
+func About(tpl *view.Templates) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := tpl.Render(c, "about", "О нас", nil); err != nil {
 			core.LogError("Ошибка рендеринга шаблона about", map[string]interface{}{
 				"error": err.Error(),
-				"path":  r.URL.Path,
+				"path":  c.Request.URL.Path,
 			})
-			http.Error(w, "Ошибка отображения страницы", http.StatusInternalServerError)
+			c.String(http.StatusInternalServerError, "Ошибка отображения страницы")
 			return
 		}
 	}

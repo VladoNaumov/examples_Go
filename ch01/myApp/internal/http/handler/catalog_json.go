@@ -1,52 +1,32 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"myApp/internal/core"
 	"myApp/internal/storage"
+
+	"github.com/gin-gonic/gin"
 )
 
-// CatalogJSON возвращает каталог товаров в формате JSON
-func CatalogJSON() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Проверяем метод запроса
-		if r.Method != http.MethodGet {
-			http.Error(w, "Только GET разрешён", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// Получаем БД из контекста
-		db := storage.GetDBFromContext(r.Context())
+// CatalogJSON — JSON-эндпоинт каталога (Gin-версия)
+func CatalogJSON() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		db := storage.GetDBFromContext(c.Request.Context())
 		if db == nil {
 			core.LogError("DB недоступна в контексте", nil)
-			core.Fail(w, r, core.Internal("Внутренняя ошибка", nil))
+			core.FailC(c, core.Internal("Внутренняя ошибка", nil))
 			return
 		}
 
-		// Загружаем товары
-		items, err := storage.ListAllProducts(r.Context(), db)
+		items, err := storage.ListAllProducts(c.Request.Context(), db)
 		if err != nil {
-			core.LogError("Ошибка загрузки каталога", map[string]interface{}{
-				"error": err.Error(),
-			})
-			core.Fail(w, r, core.Internal("Ошибка каталога", err))
+			core.LogError("Ошибка загрузки каталога (JSON)", map[string]interface{}{"error": err.Error()})
+			core.FailC(c, core.Internal("Ошибка каталога", err))
 			return
 		}
 
-		// Настраиваем заголовки для JSON
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-
-		// Устанавливаем статус 200
-		w.WriteHeader(http.StatusOK)
-
-		// Кодируем и отправляем JSON
-		if err := json.NewEncoder(w).Encode(items); err != nil {
-			// Логируем ошибку, но не прерываем ответ (уже начали отправку)
-			core.LogError("Ошибка кодирования JSON", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
+		// Можно через ваш helper, если он есть: core.JSON(c, http.StatusOK, items)
+		c.JSON(http.StatusOK, items)
 	}
 }

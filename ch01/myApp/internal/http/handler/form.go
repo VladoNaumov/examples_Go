@@ -1,5 +1,6 @@
 package handler
 
+// form.go (Gin)
 import (
 	"errors"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"myApp/internal/core"
 	"myApp/internal/view"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -32,10 +34,10 @@ var (
 	sanitizer = bluemonday.UGCPolicy() // Санитизатор ввода
 )
 
-// FormIndex возвращает обработчик отображения формы (OWASP A03: Injection)
-func FormIndex(tpl *view.Templates) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ok := r.URL.Query().Get("ok") == "1"
+// FormIndex — GET-страница формы (OWASP A03: Injection)
+func FormIndex(tpl *view.Templates) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ok := c.Query("ok") == "1"
 
 		data := FormView{
 			Form:   FormData{},
@@ -43,40 +45,42 @@ func FormIndex(tpl *view.Templates) http.HandlerFunc {
 			OK:     ok,
 		}
 
-		if err := tpl.Render(w, r, "form", "Форма", data); err != nil {
+		if err := tpl.Render(c, "form", "Форма", data); err != nil {
 			core.LogError("Ошибка рендеринга шаблона form", map[string]interface{}{
 				"error": err.Error(),
-				"path":  r.URL.Path,
+				"path":  c.Request.URL.Path,
 			})
-			http.Error(w, "Ошибка отображения страницы", http.StatusInternalServerError)
+			c.String(http.StatusInternalServerError, "Ошибка отображения страницы")
 			return
 		}
 	}
 }
 
-// FormSubmit возвращает обработчик отправки формы (OWASP A03, A05)
-func FormSubmit(tpl *view.Templates) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Метод не разрешён", http.StatusMethodNotAllowed)
+// FormSubmit — POST-обработчик отправки формы (OWASP A03, A05)
+func FormSubmit(tpl *view.Templates) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodPost {
+			c.String(http.StatusMethodNotAllowed, "Метод не разрешён")
 			return
 		}
 
-		// Ограничивает размер тела запроса (1 MB)
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "Некорректный запрос", http.StatusBadRequest)
+		// Ограничиваем размер тела запроса (1 MB)
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+
+		// Явно парсим форму (можно использовать c.Request.ParseForm() или c.ShouldBind)
+		if err := c.Request.ParseForm(); err != nil {
+			c.String(http.StatusBadRequest, "Некорректный запрос")
 			return
 		}
 
 		// Санитизация данных формы
 		f := FormData{
-			Name:    sanitizer.Sanitize(strings.TrimSpace(r.Form.Get("name"))),
-			Email:   sanitizer.Sanitize(strings.TrimSpace(r.Form.Get("email"))),
-			Message: sanitizer.Sanitize(strings.TrimSpace(r.Form.Get("message"))),
+			Name:    sanitizer.Sanitize(strings.TrimSpace(c.Request.Form.Get("name"))),
+			Email:   sanitizer.Sanitize(strings.TrimSpace(c.Request.Form.Get("email"))),
+			Message: sanitizer.Sanitize(strings.TrimSpace(c.Request.Form.Get("message"))),
 		}
 
-		// Проверка валидации
+		// Валидация
 		errs := map[string]string{}
 		if err := validate.Struct(f); err != nil {
 			var verrs validator.ValidationErrors
@@ -116,7 +120,6 @@ func FormSubmit(tpl *view.Templates) http.HandlerFunc {
 				}
 				log.Printf("INFO: Ошибка валидации формы: %v", errs)
 			} else {
-				// Обработка других типов ошибок валидации
 				var invErr *validator.InvalidValidationError
 				if errors.As(err, &invErr) {
 					errs["form"] = "Неверная конфигурация валидации"
@@ -128,26 +131,25 @@ func FormSubmit(tpl *view.Templates) http.HandlerFunc {
 			}
 		}
 
-		// Если есть ошибки — рендерим форму снова с сообщениями
+		// Если есть ошибки — возвращаем 400 и рендерим форму с ошибками
 		if len(errs) > 0 {
 			data := FormView{
 				Form:   f,
 				Errors: errs,
 				OK:     false,
 			}
-
-			w.WriteHeader(http.StatusBadRequest)
-			if err := tpl.Render(w, r, "form", "Форма", data); err != nil {
+			c.Status(http.StatusBadRequest) // статус до рендера
+			if err := tpl.Render(c, "form", "Форма", data); err != nil {
 				core.LogError("Ошибка рендеринга шаблона form", map[string]interface{}{
 					"error": err.Error(),
-					"path":  r.URL.Path,
+					"path":  c.Request.URL.Path,
 				})
-				http.Error(w, "Ошибка отображения страницы", http.StatusInternalServerError)
+				c.String(http.StatusInternalServerError, "Ошибка отображения страницы")
 			}
 			return
 		}
 
-		// PRG-паттерн: перенаправляем на форму с флагом успеха
-		http.Redirect(w, r, "/form?ok=1", http.StatusSeeOther)
+		// PRG-паттерн: редирект на GET /form?ok=1
+		c.Redirect(http.StatusSeeOther, "/form?ok=1")
 	}
 }
