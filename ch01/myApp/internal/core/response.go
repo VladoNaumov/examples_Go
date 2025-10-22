@@ -59,7 +59,7 @@ func JSON(c *gin.Context, status int, v any) {
 //  4. Завершить цепочку middleware (Abort)
 
 func FailC(c *gin.Context, err error) {
-	// ae (AppError) — твоя обёртка для внутренних ошибок (core/app_error.go)
+	// ae (AppError) — твоя обёртка для внутренних ошибок (core/error.go)
 	// В ней есть код, HTTP-статус, сообщение и т.д.
 	ae := From(err)
 

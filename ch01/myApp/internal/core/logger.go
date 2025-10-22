@@ -13,8 +13,8 @@ import (
 )
 
 type Logger struct {
-	mainLogger  zerolog.Logger // ← НЕ *zerolog.Logger
-	errorLogger zerolog.Logger // ← НЕ *zerolog.Logger
+	mainLogger  zerolog.Logger
+	errorLogger zerolog.Logger
 	mainFile    *os.File
 	errorFile   *os.File
 	mu          sync.Mutex

@@ -57,6 +57,8 @@ func CSPBasic() gin.HandlerFunc {
 				"base-uri 'self'; "+
 				"object-src 'none'; "+
 				"frame-ancestors 'none'; "+
+				"connect-src 'self'; "+ // Разрешает AJAX, Fetch, WebSockets только на свой домен
+				"worker-src 'self'; "+ // Разрешает Web/Service Workers только со своего домена
 				"style-src 'self' https://cdn.jsdelivr.net 'nonce-"+nonce+"'; "+
 				"script-src 'self' https://cdn.jsdelivr.net 'nonce-"+nonce+"'; "+
 				"img-src 'self' data: https://cdn.jsdelivr.net; "+

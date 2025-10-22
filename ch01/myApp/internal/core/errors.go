@@ -45,3 +45,8 @@ func From(err error) *AppError {
 	}
 	return Internal("внутренняя ошибка", err)
 }
+
+// Forbidden (HTTP 403)
+func Forbidden(msg string) *AppError {
+	return &AppError{Code: "forbidden", Status: http.StatusForbidden, Message: msg}
+}

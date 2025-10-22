@@ -1,6 +1,8 @@
 package app
 
-// internal/app/app.go
+// internal/app/app.go — Главный конструктор Gin-приложения.
+// Здесь собираются все middleware, роуты и настройки безопасности.
+
 import (
 	"context"
 	"crypto/rand"
@@ -24,14 +26,13 @@ import (
 )
 
 // ВАЖНО: CSRF secret (долгоживущий ключ) ≠ CSP nonce (случайное значение на КАЖДЫЙ запрос).
-// CSRF-защита — для форм; CSP nonce — для разрешения инлайн <style>/<script nonce="...">.
 
-// initTemplates — инициализация шаблонов.
+// initTemplates — Инициализация шаблонов.
 func initTemplates() (*view.Templates, error) {
 	return view.New()
 }
 
-// New — главный конструктор Gin + вся инициализация middleware.
+// New — Главный конструктор Gin, собирает всю цепочку middleware и роуты.
 func New(cfg core.Config, db *sqlx.DB, csrfKey []byte) (http.Handler, error) {
 	tpl, err := initTemplates()
 	if err != nil {
@@ -40,13 +41,18 @@ func New(cfg core.Config, db *sqlx.DB, csrfKey []byte) (http.Handler, error) {
 
 	r := gin.New()
 
+	// Настройка режима Gin (ReleaseMode в Prod)
+	if strings.ToLower(cfg.Env) == "prod" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	// Базовые логи/восстановление паник
 	r.Use(gin.Logger(), gin.Recovery())
 
-	// Trust proxy только локально (если нужен внешний NGINX — добавь его IP тут)
+	// Trust proxy только локально (добавь IP внешних прокси, если нужно)
 	_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 
-	// Корреляция запросов
+	// Корреляция запросов (RequestID)
 	r.Use(requestid.New())
 
 	// Таймаут запроса (отсекаем "висящие" клиенты)
@@ -58,7 +64,7 @@ func New(cfg core.Config, db *sqlx.DB, csrfKey []byte) (http.Handler, error) {
 	// Security заголовки (X-Frame-Options, X-Content-Type-Options и пр.)
 	r.Use(core.SecureHeaders())
 
-	//  CSP
+	// CSP (Content-Security-Policy)
 	r.Use(core.CSPBasic())
 
 	// Безопасные cookie-сессии (HttpOnly, SameSite, Secure=prod)
@@ -67,19 +73,19 @@ func New(cfg core.Config, db *sqlx.DB, csrfKey []byte) (http.Handler, error) {
 		Path:     "/",
 		MaxAge:   86400 * 7,
 		HttpOnly: true,
-		Secure:   cfg.Secure,
+		Secure:   cfg.Secure, // Используем cfg.Secure для автоматического переключения
 		SameSite: http.SameSiteLaxMode,
 	})
 	r.Use(sessions.Sessions("mysession", store))
 
-	// CSRF защита форм. Секрет независим от CSP nonce.
+	// CSRF защита форм. Использует сессию.
 	r.Use(csrf.Middleware(csrf.Options{
 		Secret:    string(csrfKey),
-		ErrorFunc: csrfError,
+		ErrorFunc: csrfError, // Использует 403 Forbidden через core.FailC
 	}))
 
-	// Статика (если папка есть) — ВКЛЮЧЕНО
-	serveStatic(r)
+	// Статика (с условным отключением кэша в Dev-режиме)
+	serveStatic(r, cfg.Env)
 
 	// Роуты
 	registerRoutes(r, tpl)
@@ -88,12 +94,14 @@ func New(cfg core.Config, db *sqlx.DB, csrfKey []byte) (http.Handler, error) {
 }
 
 // RequestTimeout — безопасный таймаут для всего запроса.
+// Если истек таймаут и ответ еще не был отправлен, возвращает 408 Request Timeout.
 func RequestTimeout(d time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if d <= 0 {
 			c.Next()
 			return
 		}
+
 		ctx, cancel := context.WithTimeout(c.Request.Context(), d)
 		defer cancel()
 
@@ -102,7 +110,12 @@ func RequestTimeout(d time.Duration) gin.HandlerFunc {
 
 		// Если контекст протух и ещё ничего не было записано в ответ — вернём 408
 		if ctx.Err() != nil && !c.Writer.Written() {
-			c.AbortWithStatusJSON(http.StatusRequestTimeout, gin.H{"error": "timeout"})
+			// Логируем факт таймаута для мониторинга
+			core.LogError("Запрос завершился по таймауту", map[string]interface{}{
+				"timeout": d.String(),
+				"path":    c.FullPath(),
+			})
+			c.AbortWithStatusJSON(http.StatusRequestTimeout, gin.H{"error": "request timeout"})
 		}
 	}
 }
@@ -112,45 +125,56 @@ func withNonceAndDB(db *sqlx.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		nonce, err := generateNonce()
 		if err != nil {
-			core.LogError("nonce error", map[string]interface{}{"error": err})
-			core.FailC(c, core.Internal("nonce", err))
+			// Если nonce не сгенерировался, это критическая внутренняя ошибка
+			core.LogError("Ошибка генерации CSP nonce", map[string]interface{}{"error": err})
+			core.FailC(c, core.Internal("nonce generation failed", err))
 			return
 		}
+
+		// Кладём nonce в контекст с использованием ключа CtxNonce из core
 		ctx := context.WithValue(c.Request.Context(), core.CtxNonce, nonce)
+
+		// Кладём DB в контекст с использованием ключа CtxDBKey из storage (предполагается его определение)
 		ctx = context.WithValue(ctx, storage.CtxDBKey{}, db)
+
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
 }
 
-// csrfError — единообразный ответ на невалидный CSRF-токен.
+// csrfError — единообразный ответ на невалидный CSRF-токен (HTTP 403 Forbidden).
 func csrfError(c *gin.Context) {
-	core.FailC(c, core.Internal("CSRF invalid", nil))
+	// 403 Forbidden более точен, чем 500 Internal
+	core.FailC(c, core.Forbidden("CSRF token is invalid or missing."))
 }
 
-// serveStatic — раздача файлов из web/assets на /assets с отключённым кэшем.
-func serveStatic(r *gin.Engine) {
+// serveStatic — раздача файлов из web/assets. Отключает кэш в режиме dev.
+func serveStatic(r *gin.Engine, env string) {
 	if _, err := os.Stat("web/assets"); os.IsNotExist(err) {
-		core.LogError("web/assets missing", nil)
+		core.LogError("Папка web/assets отсутствует, статика не будет доступна", nil)
 		return
 	}
 
-	// Отключен  кэш для всех статических файлов
-	r.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
-			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-			c.Header("Pragma", "no-cache")
-			c.Header("Expires", "0")
-		}
-		c.Next()
-	}) //TODO: no-cache, no-store, must-revalidate
+	// В режиме dev — отключаем кэш для моментального обновления в браузере
+	if strings.ToLower(env) == "dev" {
+		r.Use(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+				c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+				c.Header("Pragma", "no-cache")
+				c.Header("Expires", "0")
+			}
+			c.Next()
+		})
+	}
+	// TODO: В prod стоит добавить кэширование (например, max-age=31536000)
 
 	// Раздача статики
 	r.Static("/assets", "web/assets")
 }
 
-// registerRoutes — маршруты приложения.
+// registerRoutes — Регистрация всех маршрутов приложения.
 func registerRoutes(r *gin.Engine, tpl *view.Templates) {
+	// Группы роутов и прочие обработчики
 	r.GET("/", handler.Home(tpl))
 	r.GET("/catalog", handler.Catalog(tpl))
 	r.GET("/product/:id", handler.Product(tpl))
@@ -159,12 +183,12 @@ func registerRoutes(r *gin.Engine, tpl *view.Templates) {
 	r.GET("/about", handler.About(tpl))
 	r.GET("/debug", handler.Debug)
 	r.GET("/catalog/json", handler.CatalogJSON())
-	r.NoRoute(handler.NotFound(tpl))
 
+	// Обработчик 404
+	r.NoRoute(handler.NotFound(tpl))
 }
 
-// generateNonce — создаёт 16 байт криптографически стойкой случайности и кодирует в Base64.
-// Ошибку ОБЯЗАТЕЛЬНО проверяем (golangci-lint errcheck).
+// generateNonce — Создаёт 16 байт криптографически стойкой случайности и кодирует в Base64.
 func generateNonce() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
