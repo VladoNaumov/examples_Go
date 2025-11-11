@@ -26,7 +26,7 @@ go mod init myapp
 ```go
 module myapp
 
-go 1.23
+go 1.25
 ```
 
 ---

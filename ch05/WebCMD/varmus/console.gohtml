@@ -1,0 +1,255 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>cmd.exe в браузере — xterm.js (fallback)</title>
+
+<!-- используем dist (UMD) версию — обычно она выставляет window.Terminal -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+
+<style>
+html,body { height:100%; margin:0; background:#000; color:#0f0; font-family: monospace; }
+#container { display:flex; flex-direction:column; height:100vh; }
+#term-wrapper { flex:1; padding:10px; box-sizing:border-box; }
+#terminal, #plainterm { width:100%; height:100%; background:#000; color:#0f0; overflow:auto; white-space:pre-wrap; font-family: "Courier New", monospace; font-size:14px; padding:6px; box-sizing:border-box; }
+#inputbar { display:flex; gap:8px; padding:8px; background:#0b0b0b; align-items:center; }
+#prompt { color:#0f0; white-space:pre; font-family:inherit; }
+#cmd { flex:1; background:transparent; border:1px solid #222; color:#0f0; padding:6px 8px; outline:none; font-size:16px; font-family:inherit; }
+#suggestions { position:relative; }
+#sugbox {
+position:absolute; left:0; top:-100%; transform:translateY(-8px);
+background:#111; color:#0f0; border:1px solid #0f0; padding:6px; display:none;
+max-height:200px; overflow:auto; min-width:200px; z-index:10; white-space:pre;
+}
+.hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div id="container">
+<div id="term-wrapper">
+<div id="terminal"></div>       <!-- xterm will be mounted here -->
+<div id="plainterm" class="hidden"></div> <!-- fallback plain terminal -->
+</div>
+
+<div id="inputbar">
+<div id="prompt">{{.Prompt}}</div>
+<input id="cmd" autocomplete="off" autofocus />
+<div id="suggestions">
+<div id="sugbox"></div>
+</div>
+</div>
+</div>
+
+<!-- Попытка подключить xterm UMD бандл (dist) -->
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+
+<script>
+// Проверяем, доступен ли Terminal
+function initAppWithXtermOrFallback() {
+const { Terminal } = window;
+if (typeof Terminal === 'function') {
+console.log('xterm.js loaded (window.Terminal ok)');
+initWithXterm(Terminal);
+} else {
+console.warn('xterm.js not available as window.Terminal — using plain fallback');
+initFallback();
+}
+}
+
+// ---------- WebSocket helper (shared) ----------
+function makeWs(sendCallback, onMessageCallback) {
+const wsProtocol = (location.protocol === 'https:') ? 'wss://' : 'ws://';
+const wsUrl = wsProtocol + location.host + '/ws';
+console.log('Connecting to', wsUrl);
+const ws = new WebSocket(wsUrl);
+ws.binaryType = 'arraybuffer';
+
+let wsReady = false;
+const sendQueue = [];
+
+ws.addEventListener('open', () => {
+wsReady = true;
+console.log('ws open');
+while (sendQueue.length) ws.send(sendQueue.shift());
+});
+
+ws.addEventListener('close', () => {
+wsReady = false;
+console.log('ws closed');
+});
+
+ws.addEventListener('error', (ev) => {
+console.error('ws error', ev);
+});
+
+ws.addEventListener('message', (e) => {
+let text;
+if (typeof e.data === 'string') {
+text = e.data;
+} else {
+const decoder = new TextDecoder('utf-8');
+text = decoder.decode(e.data);
+}
+onMessageCallback(text);
+});
+
+sendCallback(function sendCmd(cmd) {
+if (!cmd) return;
+if (wsReady && ws.readyState === WebSocket.OPEN) {
+try { ws.send(cmd); }
+catch (err) { console.error('send error', err); sendQueue.push(cmd); }
+} else {
+sendQueue.push(cmd);
+console.log('ws not ready — queued');
+}
+});
+
+return ws;
+}
+
+// ---------- xterm implementation ----------
+function initWithXterm(TerminalCtor) {
+const term = new TerminalCtor({
+cols: 120,
+rows: 30,
+convertEol: true,
+cursorBlink: true,
+});
+term.open(document.getElementById('terminal'));
+term.focus();
+
+const input = document.getElementById('cmd');
+const promptEl = document.getElementById('prompt');
+const sugbox = document.getElementById('sugbox');
+
+// ws
+const ws = makeWs(
+(setSender) => { window._sendCmd = setSender; },
+(text) => { term.write(text); }
+);
+
+// input handlers
+let buffer = '';
+input.addEventListener('input', () => {
+buffer = input.value;
+const lastWord = buffer.split(/[\s]+/).pop();
+if (lastWord) {
+fetch('/complete', {
+method: 'POST',
+headers: {'Content-Type': 'application/json'},
+body: JSON.stringify({Prefix: lastWord})
+}).then(r => r.json()).then(matches => {
+if (matches.length > 0) {
+sugbox.innerHTML = matches.map(m => escapeHtml(m)).join('<br>');
+sugbox.style.display = 'block';
+} else {
+sugbox.style.display = 'none';
+}
+}).catch(()=>{ sugbox.style.display='none'; });
+} else {
+sugbox.style.display = 'none';
+}
+});
+
+input.addEventListener('keydown', (e) => {
+if (e.key === 'Enter') {
+e.preventDefault();
+const cmd = input.value;
+// echo for user (server may also echo)
+term.write('\r\n' + cmd + '\r\n');
+window._sendCmd && window._sendCmd(cmd);
+input.value = '';
+sugbox.style.display = 'none';
+} else if (e.key === 'Tab') {
+e.preventDefault();
+const matches = sugbox.innerText.split('\n').filter(Boolean);
+if (matches.length === 1) {
+const word = buffer.split(/[\s]+/).pop();
+input.value = buffer.slice(0, buffer.length - word.length) + matches[0];
+sugbox.style.display = 'none';
+}
+}
+});
+
+// всё готово
+}
+
+// ---------- Plain fallback (no xterm) ----------
+function initFallback() {
+document.getElementById('terminal').classList.add('hidden');
+const plain = document.getElementById('plainterm');
+plain.classList.remove('hidden');
+
+const input = document.getElementById('cmd');
+const promptEl = document.getElementById('prompt');
+const sugbox = document.getElementById('sugbox');
+
+function appendToPlain(text) {
+// сохраняем управляющие символы примерно: заменяем \r\n и \n
+plain.textContent += text.replace(/\r\n/g, '\n');
+plain.scrollTop = plain.scrollHeight;
+}
+
+// ws
+const ws = makeWs(
+(setSender) => { window._sendCmd = setSender; },
+(text) => { appendToPlain(text); }
+);
+
+let buffer = '';
+input.addEventListener('input', () => {
+buffer = input.value;
+const lastWord = buffer.split(/[\s]+/).pop();
+if (lastWord) {
+fetch('/complete', {
+method: 'POST',
+headers: {'Content-Type': 'application/json'},
+body: JSON.stringify({Prefix: lastWord})
+}).then(r => r.json()).then(matches => {
+if (matches.length > 0) {
+sugbox.innerHTML = matches.map(m => escapeHtml(m)).join('<br>');
+sugbox.style.display = 'block';
+} else {
+sugbox.style.display = 'none';
+}
+}).catch(()=>{ sugbox.style.display='none'; });
+} else {
+sugbox.style.display = 'none';
+}
+});
+
+input.addEventListener('keydown', (e) => {
+if (e.key === 'Enter') {
+e.preventDefault();
+const cmd = input.value;
+appendToPlain('\n' + promptEl.textContent + cmd + '\n');
+window._sendCmd && window._sendCmd(cmd);
+input.value = '';
+sugbox.style.display = 'none';
+} else if (e.key === 'Tab') {
+e.preventDefault();
+const matches = sugbox.innerText.split('\n').filter(Boolean);
+if (matches.length === 1) {
+const word = buffer.split(/[\s]+/).pop();
+input.value = buffer.slice(0, buffer.length - word.length) + matches[0];
+sugbox.style.display = 'none';
+}
+}
+});
+
+// debug note
+appendToPlain('[xterm.js не загружен — используется упрощённый вывод]\n');
+}
+
+function escapeHtml(s) {
+return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Попробовать инициализировать (делаем маленькую задержку, чтобы дать сети время загрузить скрипт)
+window.addEventListener('DOMContentLoaded', () => {
+// если xterm загружен — window.Terminal должен быть готов; но ставим маленькую задержку
+setTimeout(initAppWithXtermOrFallback, 50);
+});
+</script>
+</body>
+</html>

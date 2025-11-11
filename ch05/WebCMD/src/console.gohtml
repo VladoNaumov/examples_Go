@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>CMD в браузере — fallback</title>
+    <style>
+        body { margin:0; background:#000; color:#0f0; font-family:'Courier New', monospace; }
+        #term { padding:10px; height:90vh; overflow-y:auto; white-space:pre; line-height:1.2em; }
+        #inputbar { display:flex; background:#111; padding:5px; }
+        #prompt { color:#0f0; margin-right:5px; }
+        #cmd { flex:1; background:transparent; border:none; color:#0f0; outline:none; font-family:inherit; font-size:16px; }
+        #suggestions { position:absolute; left:0; bottom:100%; background:#222; color:#0f0; border:1px solid #0f0; padding:5px; display:none; max-height:200px; overflow:auto; width:100%; }
+    </style>
+</head>
+<body>
+<div id="term"></div>
+<div id="inputbar">
+    <span id="prompt">{{.Prompt}}</span>
+    <input id="cmd" autocomplete="off" autofocus>
+    <div id="suggestions"></div>
+</div>
+
+<script>
+    const term = document.getElementById('term');
+    const input = document.getElementById('cmd');
+    const promptEl = document.getElementById('prompt');
+    const sugg = document.getElementById('suggestions');
+
+    function makeWs(sendCallback, onMessageCallback){
+        const wsProtocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const ws = new WebSocket(wsProtocol + location.host + '/ws');
+        ws.binaryType = 'arraybuffer';
+        let ready=false, queue=[];
+
+        ws.addEventListener('open', ()=>{ ready=true; while(queue.length) ws.send(queue.shift()); });
+        ws.addEventListener('close', ()=>{ ready=false; });
+        ws.addEventListener('error', ev=>console.error('ws error', ev));
+        ws.addEventListener('message', e=>{
+            let text = typeof e.data==='string' ? e.data : new TextDecoder('utf-8').decode(e.data);
+            appendToTerm(text);
+        });
+
+        sendCallback(cmd=>{
+            if(!cmd) return;
+            if(ready && ws.readyState===WebSocket.OPEN) ws.send(cmd);
+            else queue.push(cmd);
+        });
+
+        return ws;
+    }
+
+    function appendToTerm(text){
+        term.textContent += text;
+        term.scrollTop = term.scrollHeight; // прокрутка вниз
+    }
+
+    const ws = makeWs(s=>window._sendCmd=s, appendToTerm);
+
+    let buffer='';
+    input.addEventListener('input', ()=>{
+        buffer = input.value;
+        const lastWord = buffer.split(/\s+/).pop();
+        if(lastWord){
+            fetch('/complete', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({Prefix:lastWord})
+            }).then(r=>r.json()).then(matches=>{
+                if(matches.length>0){
+                    sugg.innerHTML = matches.join('<br>');
+                    sugg.style.display='block';
+                } else sugg.style.display='none';
+            }).catch(()=>sugg.style.display='none');
+        } else sugg.style.display='none';
+    });
+
+    input.addEventListener('keydown', e=>{
+        if(e.key==='Enter'){
+            e.preventDefault();
+            const cmd = input.value;
+            appendToTerm(promptEl.textContent + cmd + '\n'); // эхо команды
+            window._sendCmd && window._sendCmd(cmd);
+            input.value='';
+            sugg.style.display='none';
+        }
+        if(e.key==='Tab'){
+            e.preventDefault();
+            const matches = sugg.innerText.split('\n').filter(Boolean);
+            if(matches.length===1){
+                const word = buffer.split(/\s+/).pop();
+                input.value = buffer.slice(0, buffer.length - word.length) + matches[0];
+                sugg.style.display='none';
+            }
+        }
+    });
+</script>
+</body>
+</html>
