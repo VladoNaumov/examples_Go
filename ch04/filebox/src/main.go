@@ -12,9 +12,11 @@ import (
 	"strings"
 )
 
+// Папка, в которой будут храниться все загруженные файлы и созданные папки.
 var uploadDir = "./uploads"
 
-// formatSize преобразует размер файла в байтах в удобочитаемый формат (B, KB, MB, GB).
+// formatSize — вспомогательная функция для форматирования размера файла.
+// Преобразует количество байт в более понятный формат: B, KB, MB, GB и т.д.
 func formatSize(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {
@@ -28,52 +30,45 @@ func formatSize(bytes int64) string {
 	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
+// funcMap — набор пользовательских функций, которые можно использовать в HTML-шаблоне.
 var funcMap = template.FuncMap{
-	"split":      strings.Split,
-	"join":       strings.Join,
-	"add":        func(a, b int) int { return a + b },
-	"slice":      func(arr []string, start, end int) []string { return arr[start:end] },
-	"div":        func(a int64, b float64) float64 { return float64(a) / b },
-	"formatSize": formatSize,
+	"split":      strings.Split,                                                         // Разделить строку по разделителю
+	"join":       strings.Join,                                                          // Объединить массив строк
+	"add":        func(a, b int) int { return a + b },                                   // Сложение чисел
+	"slice":      func(arr []string, start, end int) []string { return arr[start:end] }, // Вырезать часть массива
+	"div":        func(a int64, b float64) float64 { return float64(a) / b },            // Деление чисел
+	"formatSize": formatSize,                                                            // Форматирование размера файла
 }
 
+// tmpl — шаблон HTML-страницы (index.gohtml)
 var tmpl *template.Template
 
+// init выполняется при старте программы. Загружает шаблон и связывает функции из funcMap.
 func init() {
 	tmpl = template.New("index.gohtml").Funcs(funcMap)
 	tmpl = template.Must(tmpl.ParseFiles("static/index.gohtml"))
 }
 
+// File — структура, описывающая один элемент (файл или папку)
 type File struct {
-	Name          string
-	IsDir         bool
-	Size          int64
-	FormattedSize string
-	URL           string
-	DeleteURL     string
+	Name          string // Имя файла или папки
+	IsDir         bool   // Признак, является ли это папкой
+	Size          int64  // Размер файла в байтах
+	FormattedSize string // Размер файла в читаемом виде (например, "2.1 MB")
+	URL           string // Ссылка для открытия
+	DeleteURL     string // Ссылка для удаления
 }
 
+// PageData — структура данных, передаваемая в шаблон
 type PageData struct {
-	CurrentPath string
-	ParentPath  string
-	Items       []File
+	CurrentPath string // Текущая папка (для отображения пути)
+	ParentPath  string // Родительская папка (для кнопки "Назад")
+	Items       []File // Список файлов и папок
 }
 
-func main() {
-	log.Println("Инициализация: Создание директории для загрузки")
-	os.MkdirAll(uploadDir, os.ModePerm)
-
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/upload", uploadHandler)
-	http.HandleFunc("/mkdir", mkdirHandler)
-	http.HandleFunc("/delete/", deleteHandler)
-	http.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir(uploadDir))))
-
-	log.Println("Сервер запущен на: http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
+// homeHandler — обрабатывает отображение текущей папки и списка файлов
 func homeHandler(w http.ResponseWriter, r *http.Request) {
+	// Извлекаем путь из URL, очищаем и приводим к безопасному виду
 	rawPath := strings.TrimPrefix(r.URL.Path, "/")
 	cleanPath := path.Clean(rawPath)
 	if cleanPath == "." {
@@ -83,6 +78,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	osPath := filepath.FromSlash(cleanPath)
 	fullPath := filepath.Join(uploadDir, osPath)
 
+	// Проверяем, что пользователь не пытается выйти за пределы uploadDir
 	rel, err := filepath.Rel(uploadDir, fullPath)
 	if err != nil || strings.Contains(rel, "..") {
 		http.Error(w, "Доступ запрещён: Недопустимый путь", http.StatusForbidden)
@@ -100,12 +96,14 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Если это файл — перенаправляем на прямую ссылку (скачивание или просмотр)
 	if !stat.IsDir() {
 		fileURL := "/files/" + cleanPath
 		http.Redirect(w, r, fileURL, http.StatusTemporaryRedirect)
 		return
 	}
 
+	// Если это папка — читаем её содержимое
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
 		log.Printf("Ошибка при os.ReadDir(%s): %v", fullPath, err)
@@ -113,6 +111,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Собираем список файлов и папок
 	var items []File
 	for _, entry := range entries {
 		info, err := entry.Info()
@@ -136,6 +135,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 			FormattedSize: formattedSize,
 		}
 
+		// Формируем ссылки
 		if entry.IsDir() {
 			item.URL = "/" + path.Join(cleanPath, name)
 		} else {
@@ -147,6 +147,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		items = append(items, item)
 	}
 
+	// Определяем путь для кнопки "Назад"
 	parent := path.Dir(cleanPath)
 	if parent == "." || parent == "/" {
 		parent = ""
@@ -158,6 +159,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		Items:       items,
 	}
 
+	// Отправляем данные в шаблон
 	err = tmpl.ExecuteTemplate(w, "index.gohtml", data)
 	if err != nil {
 		log.Println("Template execute error:", err)
@@ -165,24 +167,28 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// uploadHandler — обработчик загрузки файлов
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Метод не разрешён", http.StatusMethodNotAllowed)
 		return
 	}
 
-	r.ParseMultipartForm(100 << 20) // 100 МБ
+	// Разбор формы (до 100 МБ)
+	r.ParseMultipartForm(100 << 20)
 
-	dir := r.FormValue("dir")
+	dir := r.FormValue("dir") // Папка, куда загружаем
 	osDir := filepath.FromSlash(dir)
 	fullDir := filepath.Join(uploadDir, osDir)
 
+	// Проверяем безопасность пути
 	rel, err := filepath.Rel(uploadDir, fullDir)
 	if err != nil || strings.Contains(rel, "..") {
 		http.Error(w, "Недопустимый путь", http.StatusBadRequest)
 		return
 	}
 
+	// Извлекаем файл из формы
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "Файл не выбран или ошибка формы: "+err.Error(), http.StatusBadRequest)
@@ -191,10 +197,8 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	dstPath := filepath.Join(fullDir, header.Filename)
-	if _, err := os.Stat(dstPath); err == nil {
-		log.Printf("Файл %s уже существует. Перезапись.", dstPath)
-	}
 
+	// Создаём новый файл и копируем содержимое
 	dst, err := os.Create(dstPath)
 	if err != nil {
 		log.Printf("Ошибка при os.Create(%s): %v", dstPath, err)
@@ -210,18 +214,21 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// После успешной загрузки — возвращаемся на текущую директорию
 	http.Redirect(w, r, "/"+dir, http.StatusSeeOther)
 }
 
+// mkdirHandler — создаёт новую папку в текущем каталоге
 func mkdirHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Метод не разрешён", http.StatusMethodNotAllowed)
 		return
 	}
 
-	dir := r.FormValue("dir")
-	name := r.FormValue("name")
+	dir := r.FormValue("dir")   // Текущая папка
+	name := r.FormValue("name") // Имя новой папки
 
+	// Проверка корректности имени (нельзя ../, /, \, :)
 	if name == "" || strings.ContainsAny(name, "/\\:") || strings.Contains(name, "..") {
 		http.Error(w, "Недопустимое имя папки (запрещены /, \\, :, ..)", http.StatusBadRequest)
 		return
@@ -230,22 +237,26 @@ func mkdirHandler(w http.ResponseWriter, r *http.Request) {
 	osDir := filepath.FromSlash(dir)
 	fullPath := filepath.Join(uploadDir, osDir, name)
 
+	// Проверка безопасности пути
 	rel, err := filepath.Rel(uploadDir, fullPath)
 	if err != nil || strings.Contains(rel, "..") {
 		http.Error(w, "Недопустимый путь", http.StatusBadRequest)
 		return
 	}
 
+	// Пытаемся создать папку
 	if err := os.Mkdir(fullPath, os.ModePerm); err != nil {
 		log.Printf("Ошибка при os.Mkdir(%s): %v", fullPath, err)
 		http.Error(w, "Не удалось создать папку (возможно, уже существует)", http.StatusInternalServerError)
 		return
 	}
 
+	// После создания — переходим в новую папку
 	newPath := path.Join(dir, name)
 	http.Redirect(w, r, "/"+newPath, http.StatusSeeOther)
 }
 
+// deleteHandler — удаляет файл или папку (включая всё содержимое)
 func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Метод не разрешён", http.StatusMethodNotAllowed)
@@ -258,6 +269,7 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 		cleanPath = strings.TrimPrefix(cleanPath, "/")
 	}
 
+	// Нельзя удалить корневую папку
 	if cleanPath == "" || cleanPath == "." {
 		http.Error(w, "Нельзя удалить корневую папку", http.StatusForbidden)
 		return
@@ -266,21 +278,40 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	osPath := filepath.FromSlash(cleanPath)
 	fullPath := filepath.Join(uploadDir, osPath)
 
+	// Проверка безопасности пути
 	rel, err := filepath.Rel(uploadDir, fullPath)
 	if err != nil || strings.Contains(rel, "..") {
 		http.Error(w, "Доступ запрещён: Недопустимый путь", http.StatusForbidden)
 		return
 	}
 
+	// Удаляем файл или папку
 	if err := os.RemoveAll(fullPath); err != nil {
 		log.Printf("Ошибка при os.RemoveAll(%s): %v", fullPath, err)
 		http.Error(w, "Не удалось удалить", http.StatusInternalServerError)
 		return
 	}
 
+	// После удаления — переходим в родительскую папку
 	parent := path.Dir(cleanPath)
 	if parent == "." || parent == "/" {
 		parent = ""
 	}
 	http.Redirect(w, r, "/"+parent, http.StatusSeeOther)
+}
+
+// Точка входа в программу
+func main() {
+	log.Println("Инициализация: Создание директории для загрузки")
+	os.MkdirAll(uploadDir, os.ModePerm) // Создаёт uploads, если её нет
+
+	// Настраиваем маршруты HTTP
+	http.HandleFunc("/", homeHandler)                                                         // Главная страница — список файлов/папок
+	http.HandleFunc("/upload", uploadHandler)                                                 // Загрузка файла
+	http.HandleFunc("/mkdir", mkdirHandler)                                                   // Создание папки
+	http.HandleFunc("/delete/", deleteHandler)                                                // Удаление файла или папки
+	http.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir(uploadDir)))) // Отдача файлов
+
+	log.Println("Сервер запущен на: http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", nil)) // Запуск HTTP-сервера
 }
