@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
+	"os"
 	"sort"
+	"strings"
+	"time"
 )
 
 // RPG — turn-based battle simulator.
-// Grok (Запуск: go run main.go)
 
 type DamageType string
 
@@ -178,7 +181,7 @@ func (c *Character) EffectiveSpeed() int {
 	return sp
 }
 
-func (c *Character) ApplyEffectsStartTurn(logs *[]string) {
+func (c *Character) ApplyEffectsStartTurn(logFunc func(string)) {
 	totalDot := 0
 	for _, e := range c.Effects {
 		if e.DotHP != 0 {
@@ -186,25 +189,25 @@ func (c *Character) ApplyEffectsStartTurn(logs *[]string) {
 		}
 	}
 	if totalDot != 0 {
-		c.TakeDamage(totalDot, Pure, logs)
-		*logs = append(*logs, fmt.Sprintf("%s takes %d DOT damage", c.Name, totalDot))
+		c.TakeDamage(totalDot, Pure, logFunc)
+		logFunc(fmt.Sprintf("%s takes %d DOT damage", c.Name, totalDot))
 	}
 }
 
-func (c *Character) ApplyEffectsEndTurn(logs *[]string) {
+func (c *Character) ApplyEffectsEndTurn(logFunc func(string)) {
 	newEffects := make([]Effect, 0, len(c.Effects))
 	for i := range c.Effects {
 		c.Effects[i].Tick()
 		if c.Effects[i].Duration > 0 {
 			newEffects = append(newEffects, c.Effects[i])
 		} else {
-			*logs = append(*logs, fmt.Sprintf("Effect %s on %s ended", c.Effects[i].Name, c.Name))
+			logFunc(fmt.Sprintf("Effect %s on %s ended", c.Effects[i].Name, c.Name))
 		}
 	}
 	c.Effects = newEffects
 }
 
-func (c *Character) TakeDamage(amount int, dtype DamageType, logs *[]string) {
+func (c *Character) TakeDamage(amount int, dtype DamageType, logFunc func(string)) {
 	actual := amount
 	if dtype == Physical {
 		def := c.EffectiveDefense()
@@ -220,7 +223,7 @@ func (c *Character) TakeDamage(amount int, dtype DamageType, logs *[]string) {
 	if c.Stats.HP <= 0 {
 		c.Stats.HP = 0
 		c.Alive = false
-		*logs = append(*logs, fmt.Sprintf("%s died!", c.Name))
+		logFunc(fmt.Sprintf("%s died!", c.Name))
 	}
 }
 
@@ -239,27 +242,27 @@ func (c *Character) UseMP(amount int) bool {
 	return true
 }
 
-func (c *Character) AddEffect(e Effect, logs *[]string) {
+func (c *Character) AddEffect(e Effect, logFunc func(string)) {
 	c.Effects = append(c.Effects, e)
-	*logs = append(*logs, fmt.Sprintf("%s gains effect: %s (dur=%d)", c.Name, e.Name, e.Duration))
+	logFunc(fmt.Sprintf("%s gains effect: %s (dur=%d)", c.Name, e.Name, e.Duration))
 }
 
-func (c *Character) EquipWeapon(w *Weapon, logs *[]string) {
+func (c *Character) EquipWeapon(w *Weapon, logFunc func(string)) {
 	c.Weapon = w
-	*logs = append(*logs, fmt.Sprintf("%s equips weapon: %s", c.Name, w.Name))
+	logFunc(fmt.Sprintf("%s equips weapon: %s", c.Name, w.Name))
 }
 
 func (c *Character) UnequipWeapon() {
 	c.Weapon = nil
 }
 
-func (c *Character) EquipArmor(a *Armor, logs *[]string) {
+func (c *Character) EquipArmor(a *Armor, logFunc func(string)) {
 	c.Armor = a
 	if a.HPBonus != 0 {
 		c.Stats.HPMax += a.HPBonus
 		c.Stats.HP += a.HPBonus // Apply bonus
 	}
-	*logs = append(*logs, fmt.Sprintf("%s equips armor: %s", c.Name, a.Name))
+	logFunc(fmt.Sprintf("%s equips armor: %s", c.Name, a.Name))
 }
 
 func (c *Character) UnequipArmor() {
@@ -272,7 +275,7 @@ func (c *Character) UnequipArmor() {
 	c.Armor = nil
 }
 
-func (c *Character) BasicAttack(target *Character, logs *[]string) {
+func (c *Character) BasicAttack(target *Character, logFunc func(string)) {
 	if !c.Alive {
 		return
 	}
@@ -285,23 +288,23 @@ func (c *Character) BasicAttack(target *Character, logs *[]string) {
 	base := rand.Intn(max_-min_+1) + min_ + c.EffectiveAttack()
 	if rand.Float64() < c.Stats.CritRate {
 		base = int(float64(base) * c.Stats.CritMult)
-		*logs = append(*logs, fmt.Sprintf("Critical hit! (%s)", c.Name))
+		logFunc(fmt.Sprintf("Critical hit! (%s)", c.Name))
 	}
-	*logs = append(*logs, fmt.Sprintf("%s attacks %s for %d damage (%s)", c.Name, target.Name, base, dtype))
-	target.TakeDamage(base, dtype, logs)
+	logFunc(fmt.Sprintf("%s attacks %s for %d damage (%s)", c.Name, target.Name, base, dtype))
+	target.TakeDamage(base, dtype, logFunc)
 }
 
-func (c *Character) UseSkillAt(idx int, targets []*Character, logs *[]string) {
+func (c *Character) UseSkillAt(idx int, targets []*Character, logFunc func(string)) {
 	if idx < 0 || idx >= len(c.Skills) {
-		*logs = append(*logs, fmt.Sprintf("%s tried to use invalid skill", c.Name))
+		logFunc(fmt.Sprintf("%s tried to use invalid skill", c.Name))
 		return
 	}
 	s := c.Skills[idx]
 	if !c.UseMP(s.MPCost) {
-		*logs = append(*logs, fmt.Sprintf("%s lacks MP for %s", c.Name, s.Name))
+		logFunc(fmt.Sprintf("%s lacks MP for %s", c.Name, s.Name))
 		return
 	}
-	*logs = append(*logs, fmt.Sprintf("%s uses skill %s", c.Name, s.Name))
+	logFunc(fmt.Sprintf("%s uses skill %s", c.Name, s.Name))
 	// Damage
 	if s.DamageMultiplier > 0 {
 		for _, t := range targets {
@@ -315,12 +318,12 @@ func (c *Character) UseSkillAt(idx int, targets []*Character, logs *[]string) {
 			power += rand.Intn(3) - 1
 			if rand.Float64() < c.Stats.CritRate {
 				power = int(float64(power) * c.Stats.CritMult)
-				*logs = append(*logs, fmt.Sprintf("Skill crit! (%s)", c.Name))
+				logFunc(fmt.Sprintf("Skill crit! (%s)", c.Name))
 			}
-			*logs = append(*logs, fmt.Sprintf("%s deals %d damage to %s with %s", c.Name, power, t.Name, s.Name))
-			t.TakeDamage(power, s.DamageType, logs)
+			logFunc(fmt.Sprintf("%s deals %d damage to %s with %s", c.Name, power, t.Name, s.Name))
+			t.TakeDamage(power, s.DamageType, logFunc)
 			if s.Effect != nil {
-				t.AddEffect(*s.Effect, logs)
+				t.AddEffect(*s.Effect, logFunc)
 			}
 		}
 	}
@@ -331,9 +334,9 @@ func (c *Character) UseSkillAt(idx int, targets []*Character, logs *[]string) {
 				continue
 			}
 			t.Heal(s.HealHP)
-			*logs = append(*logs, fmt.Sprintf("%s heals %s for %d HP", c.Name, t.Name, s.HealHP))
+			logFunc(fmt.Sprintf("%s heals %s for %d HP", c.Name, t.Name, s.HealHP))
 			if s.Effect != nil {
-				t.AddEffect(*s.Effect, logs)
+				t.AddEffect(*s.Effect, logFunc)
 			}
 		}
 	}
@@ -352,7 +355,6 @@ type Battle struct {
 	Players []*Character
 	Enemies []*Character
 	Round   int
-	Logs    []string
 }
 
 func NewBattle(players []*Character, enemies []*Character) *Battle {
@@ -360,7 +362,6 @@ func NewBattle(players []*Character, enemies []*Character) *Battle {
 		Players: players,
 		Enemies: enemies,
 		Round:   0,
-		Logs:    []string{},
 	}
 }
 
@@ -379,9 +380,9 @@ func (b *Battle) AllDead(team string) bool {
 	return true
 }
 
-func (b *Battle) Turn() {
+func (b *Battle) Turn(logFunc func(string)) {
 	b.Round++
-	b.Logs = append(b.Logs, fmt.Sprintf("=== Round %d ===", b.Round))
+	logFunc(fmt.Sprintf("=== Round %d ===", b.Round))
 	all := append([]*Character{}, b.Players...)
 	all = append(all, b.Enemies...)
 	// Sort by speed descending
@@ -393,7 +394,13 @@ func (b *Battle) Turn() {
 		if !actor.Alive {
 			continue
 		}
-		actor.ApplyEffectsStartTurn(&b.Logs)
+
+		// Simulate "thinking" delay
+		logFunc(fmt.Sprintf("%s is thinking...", actor.Name))
+		time.Sleep(1 * time.Second)
+
+		actor.ApplyEffectsStartTurn(logFunc)
+		time.Sleep(500 * time.Millisecond) // Short delay after DOT
 
 		var targets []*Character
 		if actor.Team == "player" {
@@ -416,8 +423,9 @@ func (b *Battle) Turn() {
 				if s.TargetAll {
 					targ = targets
 				}
-				actor.UseSkillAt(skillIdx, targ, &b.Logs)
+				actor.UseSkillAt(skillIdx, targ, logFunc)
 				usedAction = true
+				time.Sleep(1 * time.Second) // Delay after skill
 			}
 		}
 
@@ -425,11 +433,13 @@ func (b *Battle) Turn() {
 			// Basic attack
 			target := chooseFirstAlive(targets)
 			if target != nil {
-				actor.BasicAttack(target, &b.Logs)
+				actor.BasicAttack(target, logFunc)
+				time.Sleep(1 * time.Second) // Delay after attack
 			}
 		}
 
-		actor.ApplyEffectsEndTurn(&b.Logs)
+		actor.ApplyEffectsEndTurn(logFunc)
+		time.Sleep(500 * time.Millisecond) // Short delay after effects
 
 		if b.AllDead("player") || b.AllDead("enemy") {
 			return
@@ -438,18 +448,21 @@ func (b *Battle) Turn() {
 }
 
 func (b *Battle) Run() {
+	logFunc := func(msg string) {
+		fmt.Println(msg)
+	}
 	for !b.AllDead("player") && !b.AllDead("enemy") {
-		b.Turn()
+		b.Turn(logFunc)
 	}
 	if b.AllDead("enemy") {
-		b.Logs = append(b.Logs, "Players win!")
+		logFunc("Players win!")
 	} else {
-		b.Logs = append(b.Logs, "Enemies win!")
+		logFunc("Enemies win!")
 	}
 }
 
-func main() {
-	//rand.Seed(time.Now().UnixNano())
+func setupBattle() *Battle {
+	rand.Seed(time.Now().UnixNano()) //TODO: to correct
 
 	heroStats := Stats{
 		HPMax:    60,
@@ -478,13 +491,13 @@ func main() {
 		DamageMax:   6,
 		DamageType:  Physical,
 		AttackBonus: 1,
-	}, &[]string{})
+	}, func(string) {}) // Dummy log func for setup
 	hero.EquipArmor(&Armor{
 		Name:         "Кожаная броня",
 		DefenseBonus: 1,
 		ResistBonus:  0,
 		HPBonus:      5,
-	}, &[]string{})
+	}, func(string) {}) // Dummy
 
 	// companion
 	clericStats := Stats{
@@ -513,7 +526,7 @@ func main() {
 		DamageMax:  3,
 		DamageType: Magic,
 		MagicBonus: 1,
-	}, &[]string{})
+	}, func(string) {}) // Dummy
 
 	// enemies
 	goblinStats := Stats{
@@ -528,9 +541,9 @@ func main() {
 		CritMult: 1.5,
 	}
 	gob1 := NewCharacter("e1", "Гоблин-1", "enemy", goblinStats)
-	gob1.EquipWeapon(&Weapon{Name: "Короткий кинжал", DamageMin: 2, DamageMax: 4, DamageType: Physical}, &[]string{})
+	gob1.EquipWeapon(&Weapon{Name: "Короткий кинжал", DamageMin: 2, DamageMax: 4, DamageType: Physical}, func(string) {})
 	gob2 := NewCharacter("e2", "Гоблин-2", "enemy", goblinStats)
-	gob2.EquipWeapon(&Weapon{Name: "Короткий кинжал", DamageMin: 2, DamageMax: 4, DamageType: Physical}, &[]string{})
+	gob2.EquipWeapon(&Weapon{Name: "Короткий кинжал", DamageMin: 2, DamageMax: 4, DamageType: Physical}, func(string) {})
 
 	orcStats := Stats{
 		HPMax:    35,
@@ -544,16 +557,27 @@ func main() {
 		CritMult: 1.4,
 	}
 	orc := NewCharacter("e3", "Орк", "enemy", orcStats)
-	orc.EquipWeapon(&Weapon{Name: "Клевец", DamageMin: 5, DamageMax: 8, DamageType: Physical}, &[]string{})
+	orc.EquipWeapon(&Weapon{Name: "Клевец", DamageMin: 5, DamageMax: 8, DamageType: Physical}, func(string) {})
 
 	players := []*Character{hero, cleric}
 	enemies := []*Character{gob1, gob2, orc}
 
-	b := NewBattle(players, enemies)
-	b.Run()
+	return NewBattle(players, enemies)
+}
 
-	// Print logs
-	for _, log := range b.Logs {
-		fmt.Println(log)
+func main() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		battle := setupBattle()
+		battle.Run()
+
+		fmt.Print("Play again? (y/n): ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if strings.ToLower(input) != "y" {
+			fmt.Println("Thanks for playing!")
+			return
+		}
+		fmt.Println() // Extra newline for readability
 	}
 }

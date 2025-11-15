@@ -1,4 +1,3 @@
-// file: dungeon.go
 package main
 
 import (
@@ -11,38 +10,35 @@ import (
 	"time"
 )
 
-/*
-Simple ASCII Dungeon Crawler.
-
-Run: go run dungeon.go
-Controls:
- w/a/s/d - move
- i       - show inventory
- p       - pick up item on current tile
- q       - quit
-*/
+// Simple ASCII Dungeon Crawler.
+//
+// Run: go run dungeon.go
+//
+// Controls:
+//   w/a/s/d - move
+//   i       - show inventory
+//   p       - pick up item on current tile
+//   u <idx> - use item by index
+//   q       - quit
+//
 
 type TileType int
 
 const (
-	EmptyTile TileType = iota
-	WallTile
+	WallTile TileType = iota
 	FloorTile
 )
 
 type Tile struct {
-	X       int
-	Y       int
-	Type    TileType
-	Item    *Item
-	Entity  *Entity
-	Visible bool
+	X, Y   int
+	Type   TileType
+	Item   *Item
+	Entity *Entity
 }
 
 type Item struct {
-	ID   string
 	Name string
-	// consumable: heal
+	// Consumable: heal amount.
 	Heal int
 }
 
@@ -55,14 +51,13 @@ type Stats struct {
 }
 
 type Entity struct {
-	ID       string
 	Name     string
 	X, Y     int
 	Stats    Stats
 	Inv      []Item
 	IsPlayer bool
 	Alive    bool
-	AIType   string // "basic" chase
+	AIType   string // e.g., "basic" for chase AI
 }
 
 type World struct {
@@ -74,39 +69,53 @@ type World struct {
 	Rand     *rand.Rand
 }
 
-func NewWorld(w, h int, r *rand.Rand) *World {
-	tiles := make([][]*Tile, h)
-	for y := 0; y < h; y++ {
-		row := make([]*Tile, w)
-		for x := 0; x < w; x++ {
+// NewWorld creates a new game world with random interior walls.
+func NewWorld(width, height int, r *rand.Rand) *World {
+	tiles := make([][]*Tile, height)
+	for y := 0; y < height; y++ {
+		row := make([]*Tile, width)
+		for x := 0; x < width; x++ {
 			row[x] = &Tile{X: x, Y: y, Type: FloorTile}
 		}
 		tiles[y] = row
 	}
-	world := &World{Width: w, Height: h, Tiles: tiles, Rand: r}
-	world.makeWalls()
+	world := &World{
+		Width:    width,
+		Height:   height,
+		Tiles:    tiles,
+		Rand:     r,
+		Entities: make([]*Entity, 0),
+	}
+	world.generateWalls()
 	return world
 }
 
-func (world *World) makeWalls() {
-	// border walls
-	for x := 0; x < world.Width; x++ {
-		world.Tiles[0][x].Type = WallTile
-		world.Tiles[world.Height-1][x].Type = WallTile
+// generateWalls sets border walls and adds random interior walls.
+func (w *World) generateWalls() {
+	// Border walls.
+	for x := 0; x < w.Width; x++ {
+		w.Tiles[0][x].Type = WallTile
+		w.Tiles[w.Height-1][x].Type = WallTile
 	}
-	for y := 0; y < world.Height; y++ {
-		world.Tiles[y][0].Type = WallTile
-		world.Tiles[y][world.Width-1].Type = WallTile
+	for y := 0; y < w.Height; y++ {
+		w.Tiles[y][0].Type = WallTile
+		w.Tiles[y][w.Width-1].Type = WallTile
 	}
-	// random interior walls
-	for i := 0; i < (world.Width*world.Height)/10; i++ {
-		x := world.Rand.Intn(world.Width-2) + 1
-		y := world.Rand.Intn(world.Height-2) + 1
-		world.Tiles[y][x].Type = WallTile
+
+	// Random interior walls (10% density).
+	numWalls := (w.Width * w.Height) / 10
+	for i := 0; i < numWalls; i++ {
+		x := w.Rand.Intn(w.Width-2) + 1
+		y := w.Rand.Intn(w.Height-2) + 1
+		w.Tiles[y][x].Type = WallTile
 	}
 }
 
+// PlaceEntity places an entity at (x, y) if valid, marks it alive, and tracks it.
 func (w *World) PlaceEntity(e *Entity, x, y int) {
+	if x < 0 || x >= w.Width || y < 0 || y >= w.Height || w.Tiles[y][x].Type == WallTile {
+		return // Invalid position.
+	}
 	e.X = x
 	e.Y = y
 	e.Alive = true
@@ -117,11 +126,16 @@ func (w *World) PlaceEntity(e *Entity, x, y int) {
 	}
 }
 
+// PlaceItem places an item at (x, y) if the tile is empty.
 func (w *World) PlaceItem(it Item, x, y int) {
+	if x < 0 || x >= w.Width || y < 0 || y >= w.Height ||
+		w.Tiles[y][x].Type == WallTile || w.Tiles[y][x].Entity != nil {
+		return // Invalid or occupied.
+	}
 	w.Tiles[y][x].Item = &it
 }
 
-// move entity if possible
+// MoveEntity attempts to move an entity to (nx, ny). Returns true if successful.
 func (w *World) MoveEntity(e *Entity, nx, ny int) bool {
 	if nx < 0 || nx >= w.Width || ny < 0 || ny >= w.Height {
 		return false
@@ -131,14 +145,14 @@ func (w *World) MoveEntity(e *Entity, nx, ny int) bool {
 		return false
 	}
 	if dest.Entity != nil {
-		// attack if hostile
+		// Attack if hostile.
 		if e.IsPlayer != dest.Entity.IsPlayer {
-			w.ResolveMelee(e, dest.Entity)
+			w.resolveMelee(e, dest.Entity)
 			return true
 		}
-		return false
+		return false // Blocked by friendly.
 	}
-	// move
+	// Valid move.
 	w.Tiles[e.Y][e.X].Entity = nil
 	e.X = nx
 	e.Y = ny
@@ -146,8 +160,8 @@ func (w *World) MoveEntity(e *Entity, nx, ny int) bool {
 	return true
 }
 
-func (w *World) ResolveMelee(attacker, defender *Entity) {
-	// very simple damage calc
+// resolveMelee handles a melee attack between attacker and defender.
+func (w *World) resolveMelee(attacker, defender *Entity) {
 	damage := attacker.Stats.Attack - defender.Stats.Defense/2
 	if damage < 1 {
 		damage = 1
@@ -158,190 +172,221 @@ func (w *World) ResolveMelee(attacker, defender *Entity) {
 		defender.Stats.HP = 0
 		defender.Alive = false
 		fmt.Printf("%s убит(а)!\n", defender.Name)
-		// remove from tile
 		w.Tiles[defender.Y][defender.X].Entity = nil
 	}
 }
 
+// RemoveDeadEntities cleans up dead entities from the list.
 func (w *World) RemoveDeadEntities() {
-	newlist := make([]*Entity, 0, len(w.Entities))
+	var alive []*Entity
 	for _, e := range w.Entities {
 		if e.Alive {
-			newlist = append(newlist, e)
+			alive = append(alive, e)
 		}
 	}
-	w.Entities = newlist
+	w.Entities = alive
 }
 
-// simple BFS to find direction to player (returns dx,dy of next step) or 0,0 if none
-func (w *World) BFSStepTowards(src *Entity, target *Entity) (int, int) {
-	type node struct{ x, y int }
-	H := w.Height
-	W := w.Width
-	vis := make([][]bool, H)
-	for i := 0; i < H; i++ {
-		vis[i] = make([]bool, W)
+// BFSStepTowards computes the next step (dx, dy) from src towards target using BFS.
+// Returns (0, 0) if no path.
+func (w *World) BFSStepTowards(src, target *Entity) (int, int) {
+	type pos struct{ x, y int }
+
+	height, width := w.Height, w.Width
+	visited := make([][]bool, height)
+	for i := 0; i < height; i++ {
+		visited[i] = make([]bool, width)
 	}
-	prev := make(map[node]node)
-	q := []node{{src.X, src.Y}}
-	vis[src.Y][src.X] = true
+
+	prev := make(map[pos]pos)
+	queue := []pos{{src.X, src.Y}}
+	visited[src.Y][src.X] = true
+
 	found := false
-	var dest node
-	dirs := []node{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
-	for len(q) > 0 && !found {
-		cur := q[0]
-		q = q[1:]
-		for _, d := range dirs {
-			nx := cur.x + d.x
-			ny := cur.y + d.y
-			if nx < 0 || nx >= W || ny < 0 || ny >= H {
+	var dest pos
+	deltas := []pos{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+
+	for len(queue) > 0 && !found {
+		curr := queue[0]
+		queue = queue[1:]
+
+		for _, delta := range deltas {
+			nx, ny := curr.x+delta.x, curr.y+delta.y
+			if nx < 0 || nx >= width || ny < 0 || ny >= height || visited[ny][nx] {
 				continue
 			}
-			if vis[ny][nx] {
+
+			tile := w.Tiles[ny][nx]
+			if tile.Type == WallTile {
 				continue
 			}
-			t := w.Tiles[ny][nx]
-			if t.Type == WallTile {
-				continue
-			}
-			vis[ny][nx] = true
-			prev[node{nx, ny}] = cur
+
+			visited[ny][nx] = true
+			prev[pos{nx, ny}] = curr
+
 			if nx == target.X && ny == target.Y {
 				found = true
-				dest = node{nx, ny}
+				dest = pos{nx, ny}
 				break
 			}
-			// can step through entities for pathfinding (avoid if entity is wall-like)
-			q = append(q, node{nx, ny})
+
+			queue = append(queue, pos{nx, ny})
 		}
 	}
+
 	if !found {
 		return 0, 0
 	}
-	// walk back to neighbor of src
-	cur := dest
+
+	// Backtrack to find the first step from src.
+	curr := dest
 	for {
-		p := prev[cur]
+		p := prev[curr]
 		if p.x == src.X && p.y == src.Y {
-			// cur is the next cell to step into
-			return cur.x - src.X, cur.y - src.Y
+			return curr.x - src.X, curr.y - src.Y
 		}
-		cur = p
+		curr = p
 	}
 }
 
-// render map ASCII
+// Render prints the ASCII map and player HP.
 func (w *World) Render() {
 	fmt.Println()
 	for y := 0; y < w.Height; y++ {
-		var line strings.Builder
+		var builder strings.Builder
 		for x := 0; x < w.Width; x++ {
-			t := w.Tiles[y][x]
-			ch := '.'
-			if t.Type == WallTile {
+			tile := w.Tiles[y][x]
+			var ch = '.'
+			if tile.Type == WallTile {
 				ch = '#'
-			} else if t.Entity != nil {
-				if t.Entity.IsPlayer {
+			} else if tile.Entity != nil {
+				if tile.Entity.IsPlayer {
 					ch = '@'
 				} else {
-					ch = 'g' // generic monster
+					ch = 'g' // Generic monster.
 				}
-			} else if t.Item != nil {
+			} else if tile.Item != nil {
 				ch = '!'
 			}
-			line.WriteRune(rune(ch))
+			builder.WriteRune(ch)
 		}
-		fmt.Println(line.String())
+		fmt.Println(builder.String())
 	}
 	fmt.Printf("HP: %d/%d\n", w.Player.Stats.HP, w.Player.Stats.HPMax)
 }
 
+// PlayerPickUp picks up the item on the player's current tile.
 func (w *World) PlayerPickUp() {
-	t := w.Tiles[w.Player.Y][w.Player.X]
-	if t.Item == nil {
+	tile := w.Tiles[w.Player.Y][w.Player.X]
+	if tile.Item == nil {
 		fmt.Println("Здесь нет предметов")
 		return
 	}
-	it := *t.Item
-	w.Player.Inv = append(w.Player.Inv, it)
-	fmt.Printf("Подобрали: %s\n", it.Name)
-	t.Item = nil
+	item := *tile.Item
+	w.Player.Inv = append(w.Player.Inv, item)
+	fmt.Printf("Подобрали: %s\n", item.Name)
+	tile.Item = nil
 }
 
+// PlayerUseItem uses the item at the given index in the player's inventory.
 func (w *World) PlayerUseItem(idx int) {
 	if idx < 0 || idx >= len(w.Player.Inv) {
-		fmt.Println("invalid index")
+		fmt.Println("Неверный индекс")
 		return
 	}
-	it := w.Player.Inv[idx]
-	if it.Heal > 0 {
-		w.Player.Stats.HP += it.Heal
+	item := w.Player.Inv[idx]
+	if item.Heal > 0 {
+		healAmt := item.Heal
+		w.Player.Stats.HP += healAmt
 		if w.Player.Stats.HP > w.Player.Stats.HPMax {
 			w.Player.Stats.HP = w.Player.Stats.HPMax
 		}
-		fmt.Printf("Использовано %s, восстановлено %d HP\n", it.Name, it.Heal)
+		fmt.Printf("Использовано %s, восстановлено %d HP\n", item.Name, healAmt)
 	}
-	// remove used
+	// Remove used item.
 	w.Player.Inv = append(w.Player.Inv[:idx], w.Player.Inv[idx+1:]...)
 }
 
-func main() {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	w := NewWorld(25, 12, r)
+// abs returns the absolute value of a.
+func abs(a int) int {
+	if a < 0 {
+		return -a
+	}
+	return a
+}
 
-	// create player
+// setupWorld initializes the world with dimensions.
+func setupWorld(randSrc rand.Source) *World {
+	const (
+		width  = 25
+		height = 12
+	)
+	r := rand.New(randSrc)
+	return NewWorld(width, height, r)
+}
+
+// setupPlayer creates and places the player in the world.
+func setupPlayer(world *World) {
 	player := &Entity{
-		ID:       "player1",
 		Name:     "Игрок",
 		Stats:    Stats{HPMax: 30, HP: 30, Attack: 5, Defense: 2, Speed: 5},
 		IsPlayer: true,
 	}
-	// spawn player in center
-	w.PlaceEntity(player, w.Width/2, w.Height/2)
+	world.PlaceEntity(player, world.Width/2, world.Height/2)
+}
 
-	// spawn some monsters
-	for i := 0; i < 6; i++ {
-		x := r.Intn(w.Width-4) + 2
-		y := r.Intn(w.Height-4) + 2
-		if w.Tiles[y][x].Entity != nil || w.Tiles[y][x].Type == WallTile {
-			continue
+// spawnMonsters adds a specified number of monsters to the world.
+func spawnMonsters(world *World, numMonsters int) {
+	const borderOffset = 4
+	for i := 0; i < numMonsters; i++ {
+		x := world.Rand.Intn(world.Width-borderOffset) + borderOffset/2
+		y := world.Rand.Intn(world.Height-borderOffset) + borderOffset/2
+		if world.Tiles[y][x].Entity == nil && world.Tiles[y][x].Type != WallTile {
+			monster := &Entity{
+				Name:     "Гоблин",
+				Stats:    Stats{HPMax: 8, HP: 8, Attack: 3, Defense: 0, Speed: 3},
+				IsPlayer: false,
+				AIType:   "basic",
+			}
+			world.PlaceEntity(monster, x, y)
 		}
-		mon := &Entity{
-			ID:       fmt.Sprintf("m%d", i+1),
-			Name:     "Гоблин",
-			Stats:    Stats{HPMax: 8, HP: 8, Attack: 3, Defense: 0, Speed: 3},
-			IsPlayer: false,
-			AIType:   "basic",
-		}
-		w.PlaceEntity(mon, x, y)
 	}
+}
 
-	// place some items
-	for i := 0; i < 5; i++ {
-		x := r.Intn(w.Width-4) + 2
-		y := r.Intn(w.Height-4) + 2
-		if w.Tiles[y][x].Item != nil || w.Tiles[y][x].Entity != nil || w.Tiles[y][x].Type == WallTile {
-			continue
+// spawnItems places a specified number of items in the world.
+func spawnItems(world *World, numItems int) {
+	const borderOffset = 4
+	for i := 0; i < numItems; i++ {
+		x := world.Rand.Intn(world.Width-borderOffset) + borderOffset/2
+		y := world.Rand.Intn(world.Height-borderOffset) + borderOffset/2
+		if world.Tiles[y][x].Item == nil && world.Tiles[y][x].Entity == nil && world.Tiles[y][x].Type != WallTile {
+			item := Item{Name: "Фляга здоровья", Heal: 8}
+			world.PlaceItem(item, x, y)
 		}
-		it := Item{ID: fmt.Sprintf("it%d", i), Name: "Фляга здоровья", Heal: 8}
-		w.PlaceItem(it, x, y)
 	}
+}
 
-	// game loop
+// runGameLoop handles the main game loop: input, player actions, monster turns, and cleanup.
+func runGameLoop(world *World) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		// render view
-		w.Render()
-		if w.Player.Stats.HP <= 0 {
+		world.Render()
+		if world.Player.Stats.HP <= 0 {
 			fmt.Println("Вы погибли. Игра окончена.")
 			return
 		}
+
 		fmt.Print("<<Command (w/a/s/d, p pick up, i inv, u use <i>, q quit)>>: ")
-		line, _ := reader.ReadString('\n')
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Printf("Input error: %v\n", err)
+			continue
+		}
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+
 		parts := strings.Split(line, " ")
 		cmd := parts[0]
 		switch cmd {
@@ -350,25 +395,23 @@ func main() {
 			return
 		case "w", "a", "s", "d":
 			dx, dy := 0, 0
-			if cmd == "w" {
+			switch cmd {
+			case "w":
 				dy = -1
-			}
-			if cmd == "s" {
+			case "s":
 				dy = 1
-			}
-			if cmd == "a" {
+			case "a":
 				dx = -1
-			}
-			if cmd == "d" {
+			case "d":
 				dx = 1
 			}
-			w.MoveEntity(w.Player, w.Player.X+dx, w.Player.Y+dy)
+			world.MoveEntity(world.Player, world.Player.X+dx, world.Player.Y+dy)
 		case "p":
-			w.PlayerPickUp()
+			world.PlayerPickUp()
 		case "i":
 			fmt.Println("Инвентарь:")
-			for i, it := range w.Player.Inv {
-				fmt.Printf("[%d] %s (heal:%d)\n", i, it.Name, it.Heal)
+			for idx, item := range world.Player.Inv {
+				fmt.Printf("[%d] %s (heal:%d)\n", idx, item.Name, item.Heal)
 			}
 		case "u":
 			if len(parts) < 2 {
@@ -377,39 +420,42 @@ func main() {
 			}
 			idx, err := strconv.Atoi(parts[1])
 			if err != nil {
-				fmt.Println("invalid index")
+				fmt.Println("Неверный индекс")
 				continue
 			}
-			w.PlayerUseItem(idx)
+			world.PlayerUseItem(idx)
 		default:
 			fmt.Println("Неизвестная команда")
 		}
 
-		// monsters act
-		for _, e := range w.Entities {
-			if e.IsPlayer || !e.Alive {
+		// Monster turns: simple chase AI.
+		for _, entity := range world.Entities {
+			if entity.IsPlayer || !entity.Alive {
 				continue
 			}
-			// simple chase AI: if adjacent -> attack, else step towards
-			dx := w.Player.X - e.X
-			dy := w.Player.Y - e.Y
+			dx := world.Player.X - entity.X
+			dy := world.Player.Y - entity.Y
 			if abs(dx)+abs(dy) == 1 {
-				w.ResolveMelee(e, w.Player)
+				world.resolveMelee(entity, world.Player)
 			} else {
-				stx, sty := w.BFSStepTowards(e, w.Player)
-				if stx != 0 || sty != 0 {
-					w.MoveEntity(e, e.X+stx, e.Y+sty)
+				stepX, stepY := world.BFSStepTowards(entity, world.Player)
+				if stepX != 0 || stepY != 0 {
+					world.MoveEntity(entity, entity.X+stepX, entity.Y+stepY)
 				}
 			}
 		}
-		// cleanup
-		w.RemoveDeadEntities()
+
+		// Cleanup.
+		world.RemoveDeadEntities()
 	}
 }
 
-func abs(a int) int {
-	if a < 0 {
-		return -a
-	}
-	return a
+func main() {
+	var randSrc = rand.NewSource(time.Now().UnixNano())
+	world := setupWorld(randSrc)
+	setupPlayer(world)
+	spawnMonsters(world, 6)
+	spawnItems(world, 5)
+
+	runGameLoop(world)
 }
