@@ -6,6 +6,7 @@
 - ch03 "Examples"
 - ch04 File Box
 - ch05 WebCMD
+- ch06 Shop Cart
 
 
 
