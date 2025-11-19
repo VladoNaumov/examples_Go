@@ -1,5 +1,5 @@
+### Program examples (prototypes)
 
-### 
 - ch00 "Go json-srv **Проект JSON API Server ( Go 1.25.1 )"
 - ch01 учебный, но продакшен-готовый boilerplate-проект на **Go 1.25.1 за NGINX**."
 - ch02 "Games"
@@ -7,6 +7,7 @@
 - ch04 File Box
 - ch05 WebCMD
 - ch06 Shop Cart
+- ch07 Mini Chat
 
 
 
